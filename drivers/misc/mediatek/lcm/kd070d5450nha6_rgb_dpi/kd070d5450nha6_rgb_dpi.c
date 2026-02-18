@@ -445,8 +445,8 @@ MODULE_LICENSE("GPL");
 /* --------------------------------------------------------------------------- */
 /* Local Constants */
 /* --------------------------------------------------------------------------- */
-#define FRAME_WIDTH  (800)
-#define FRAME_HEIGHT (1280)
+#define FRAME_WIDTH  (768)
+#define FRAME_HEIGHT (1024)
 
 #define GPIO_OUT_ONE  1
 #define GPIO_OUT_ZERO 0
