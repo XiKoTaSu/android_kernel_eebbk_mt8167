@@ -13,9 +13,16 @@
 
 #include "inc/alsps.h"
 #include "inc/aal_control.h"
+#include "ls_ap3220/ap3xx6c.h"
+
+#define SENSOR_OFF 0
+#define SENSOR_ON 1
+
 struct alsps_context *alsps_context_obj = NULL;
+
 struct platform_device *pltfm_dev;
 
+struct current_sensor_s *current_sensor =NULL;
 
 static struct alsps_init_info *alsps_init_list[MAX_CHOOSE_ALSPS_NUM] = {0};
 
@@ -372,9 +379,15 @@ static ssize_t als_store_active(struct device *dev, struct device_attribute *att
 	cxt = alsps_context_obj;
 
 	if (!strncmp(buf, "1", 1))
-		als_enable_data(1);
+		{
+		als_enable_data(SENSOR_ON);
+		current_sensor->sensor_als=SENSOR_ON;
+		}
 	else if (!strncmp(buf, "0", 1))
-		als_enable_data(0);
+		{
+		als_enable_data(SENSOR_OFF);
+		current_sensor->sensor_als=SENSOR_OFF;
+		}
 	else
 		ALSPS_ERR(" alsps_store_active error !!\n");
 
@@ -417,7 +430,9 @@ static ssize_t als_store_delay(struct device *dev, struct device_attribute *attr
 		mutex_unlock(&alsps_context_obj->alsps_op_mutex);
 		return count;
 	}
-
+	if((delay+1)< 200000000)
+		delay = 200000000;
+	
 	if (false == cxt->als_ctl.is_report_input_direct) {
 		mdelay = (int)delay/1000/1000;
 		atomic_set(&alsps_context_obj->delay_als, mdelay);
@@ -515,9 +530,15 @@ static ssize_t ps_store_active(struct device *dev, struct device_attribute *attr
 	cxt = alsps_context_obj;
 
 	if (!strncmp(buf, "1", 1))
+		{
 		ps_enable_data(1);
+		current_sensor->sensor_pls=SENSOR_ON;
+		}
 	else if (!strncmp(buf, "0", 1))
+		{
 		ps_enable_data(0);
+		current_sensor->sensor_pls=SENSOR_OFF;
+		}
 	else
 		ALSPS_ERR(" ps_store_active error !!\n");
 
@@ -525,6 +546,130 @@ static ssize_t ps_store_active(struct device *dev, struct device_attribute *attr
 	ALSPS_LOG(" ps_store_active done\n");
 	return count;
 }
+/*----------------------------------------------------------------------------*/
+int ps_store_active_kernel(int buf)
+{
+	struct alsps_context *cxt = NULL;
+
+	cxt = alsps_context_obj;
+
+	if(buf == 1)
+		ps_enable_data(1);
+	else if (buf == 0)
+		ps_enable_data(0);
+	else
+		ALSPS_ERR(" ps_store_active_kernel error !!\n");
+
+	ALSPS_LOG(" ps_store_active_kernel done\n");
+	return 1;
+}
+int als_store_active_kernel(int buf)
+{
+  struct alsps_context *cxt = NULL;
+
+  cxt = alsps_context_obj;
+
+  if (buf == 1)
+	  als_enable_data(1);
+  else if (buf == 0)
+	  als_enable_data(0);
+  else
+	  ALSPS_ERR(" alsps_store_active error !!\n");
+
+  ALSPS_LOG(" alsps_store_active_kernel done\n");
+  return 1;
+}
+
+/*----------------------------------------------------------------------------*/
+/****************0 chose horizontal **** 1 chose vertical**************************/
+static ssize_t alsps_store_change(struct device *dev, struct device_attribute *attr,
+				const char *buf, size_t count)
+{
+	ALSPS_LOG("lyq:entry %s",__func__);
+		return count;	//lyq only one ic
+
+	if(current_sensor->which_sensor > 1)
+	{
+		ALSPS_ERR(" alsps_store_change error: only one sensor !!\n");
+
+		return count;
+	}
+	if (!strncmp(buf, "1", 1))
+	 {
+  		mutex_lock(&alsps_context_obj->alsps_op_mutex);		//解决切换和 打开关闭als/ps的竞争
+
+		if(current_sensor->which_sensor!=1)
+  		{
+			if((current_sensor->sensor_pls == SENSOR_OFF) && (current_sensor->sensor_als == SENSOR_OFF))
+			{
+				current_sensor->which_sensor = 1;
+				change_sensor_ic(current_sensor->which_sensor);
+  				mutex_unlock(&alsps_context_obj->alsps_op_mutex);
+			
+				printk("alsps change ver sensor ok,but both off\n");
+				return count;
+			}
+			ps_store_active_kernel(SENSOR_OFF);//turn off landscape
+			als_store_active_kernel(SENSOR_OFF); 
+
+			current_sensor->which_sensor = 1;
+			change_sensor_ic(current_sensor->which_sensor);
+
+			ps_store_active_kernel(current_sensor->sensor_pls);//state renew
+			als_store_active_kernel(current_sensor->sensor_als);
+  			
+		}
+		else
+			printk("now is use the portrait sensor\n");
+  			
+		mutex_unlock(&alsps_context_obj->alsps_op_mutex);
+	}
+  	else if (!strncmp(buf, "0", 1))
+	{
+		mutex_lock(&alsps_context_obj->alsps_op_mutex);
+		
+		if(current_sensor->which_sensor!=0)
+		{
+			
+			if((current_sensor->sensor_pls == SENSOR_OFF) && (current_sensor->sensor_als == SENSOR_OFF))
+                        {
+                                current_sensor->which_sensor = 0;
+				change_sensor_ic(current_sensor->which_sensor);
+                                printk("alsps change hor sensor ok,but both off\n");
+  				mutex_unlock(&alsps_context_obj->alsps_op_mutex);
+                                
+				return count;
+                        }
+			ps_store_active_kernel(SENSOR_OFF);
+			als_store_active_kernel(SENSOR_OFF);//turn off protrait
+
+			current_sensor->which_sensor = 0;
+			
+			change_sensor_ic(current_sensor->which_sensor);
+	
+			ps_store_active_kernel(current_sensor->sensor_pls);//state renew
+			als_store_active_kernel(current_sensor->sensor_als);
+			
+  		}
+		else
+			printk("now is use the landscan sensor\n");
+  		mutex_unlock(&alsps_context_obj->alsps_op_mutex);
+	}
+	else
+		ALSPS_ERR(" alsps_store_change only 0 or 1 !!\n");
+
+
+  return count;
+}
+/*-----------return 0 is hor, 1 is ver, 2 is only hor, 3 is only ver----*/
+static ssize_t alsps_show_change(struct device *dev,
+				 struct device_attribute *attr, char *buf)
+{
+	int sensor_temp = current_sensor->which_sensor;
+	
+	return snprintf(buf, PAGE_SIZE, "%d\n", sensor_temp);
+}
+
 /*----------------------------------------------------------------------------*/
 static ssize_t ps_show_active(struct device *dev,
 				 struct device_attribute *attr, char *buf)
@@ -752,6 +897,12 @@ int ps_report_interrupt_data(int value)
 	struct alsps_context *cxt = NULL;
 	/* int err =0; */
 	cxt = alsps_context_obj;
+	if(cxt->idev==NULL)
+	{
+		ALSPS_ERR("lyq:ps input dev is NULL\n");
+		return -1;
+	}
+	
 	pr_warn("[ALS/PS] [%s]:value=%d\n", __func__, value);
 	if (cxt->is_get_valid_ps_data_after_enable == false) {
 		if (ALSPS_INVALID_VALUE != value) {
@@ -795,12 +946,17 @@ static int alsps_input_init(struct alsps_context *cxt)
 		return -ENOMEM;
 
 	dev->name = ALSPS_INPUTDEV_NAME;
+	
 	set_bit(EV_REL, dev->evbit);
+	set_bit(EV_ABS, dev->evbit);
 	set_bit(EV_SYN, dev->evbit);
+	
 	input_set_capability(dev, EV_REL, EVENT_TYPE_PS_VALUE);
 	input_set_capability(dev, EV_REL, EVENT_TYPE_PS_STATUS);
+
 	input_set_capability(dev, EV_ABS, EVENT_TYPE_ALS_VALUE);
 	input_set_capability(dev, EV_ABS, EVENT_TYPE_ALS_STATUS);
+
 	input_set_abs_params(dev, EVENT_TYPE_ALS_VALUE, ALSPS_VALUE_MIN, ALSPS_VALUE_MAX, 0, 0);
 	input_set_abs_params(dev, EVENT_TYPE_ALS_STATUS, ALSPS_STATUS_MIN, ALSPS_STATUS_MAX, 0, 0);
 	input_set_drvdata(dev, cxt);
@@ -825,6 +981,7 @@ DEVICE_ATTR(psdelay,		S_IWUSR | S_IRUGO, ps_show_delay,  ps_store_delay);
 DEVICE_ATTR(psbatch,		S_IWUSR | S_IRUGO, ps_show_batch,  ps_store_batch);
 DEVICE_ATTR(psflush,		S_IWUSR | S_IRUGO, ps_show_flush,  ps_store_flush);
 DEVICE_ATTR(psdevnum,		S_IWUSR | S_IRUGO, ps_show_devnum,  NULL);
+DEVICE_ATTR(changealsps,	S_IWUSR | S_IRUGO, alsps_show_change,  alsps_store_change);
 
 static struct attribute *alsps_attributes[] = {
 	&dev_attr_alsactive.attr,
@@ -837,6 +994,7 @@ static struct attribute *alsps_attributes[] = {
 	&dev_attr_psbatch.attr,
 	&dev_attr_psflush.attr,
 	&dev_attr_psdevnum.attr,
+	&dev_attr_changealsps.attr,
 	NULL
 };
 
@@ -1022,9 +1180,22 @@ static int alsps_probe(void)
 	ALSPS_LOG("+++++++++++++alsps_probe!!\n");
 	alsps_context_obj = alsps_context_alloc_object();
 	if (!alsps_context_obj) {
-		err = -ENOMEM;
-		ALSPS_ERR("unable to allocate devobj!\n");
+		err = -ENOMEM; ALSPS_ERR("unable to allocate devobj!\n");
 		goto exit_alloc_data_failed;
+	}
+	current_sensor = kzalloc(sizeof(*current_sensor), GFP_KERNEL);
+	if(!current_sensor)
+		{
+			err = -ENOMEM;
+			ALSPS_ERR("unable to allocate current_sensor!\n");
+			goto exit_alloc_data_failed;
+		}
+
+	/* init input dev */
+	err = alsps_input_init(alsps_context_obj);
+	if (err) {
+		ALSPS_ERR("unable to register alsps input device!\n");
+		goto exit_alloc_input_dev_failed;
 	}
 	/* init real alspseleration driver */
 	err = alsps_real_driver_init();
@@ -1032,20 +1203,35 @@ static int alsps_probe(void)
 		ALSPS_ERR("alsps real driver init fail\n");
 		goto real_driver_init_fail;
 	}
+
+	if((get_ap3xx6_init_flag() )==SENSOR_BOTH_OK)	//two sensor
+		{
+			current_sensor->which_sensor=SENSOR_HOR_OK;
+		}
+	else if((get_ap3xx6_init_flag() )==SENSOR_HOR_OK)
+		{
+			current_sensor->which_sensor = SENSOR_HOR_OK+2;	// only hor
+		}
+	else if((get_ap3xx6_init_flag() )==SENSOR_VER_OK)
+		{
+		current_sensor->which_sensor= SENSOR_VER_OK+2;
+		}
+	
+	current_sensor->sensor_als=SENSOR_OFF;
+	current_sensor->sensor_pls=SENSOR_OFF;
+
+	
 	/* init alsps common factory mode misc device */
 	err = alsps_factory_device_init();
 	if (err)
 		ALSPS_ERR("alsps factory device already registed\n");
-	/* init input dev */
-	err = alsps_input_init(alsps_context_obj);
-	if (err) {
-		ALSPS_ERR("unable to register alsps input device!\n");
-		goto exit_alloc_input_dev_failed;
-	}
+	enable_two_irq();
 	ALSPS_LOG("----alsps_probe OK !!\n");
 	return 0;
 
 real_driver_init_fail:
+	kfree(current_sensor);
+	current_sensor=NULL;
 exit_alloc_input_dev_failed:
 	kfree(alsps_context_obj);
 	alsps_context_obj = NULL;
@@ -1063,7 +1249,7 @@ static int alsps_remove(void)
 
 	misc_deregister(&alsps_context_obj->mdev);
 	kfree(alsps_context_obj);
-
+	kfree(current_sensor);
 	return 0;
 }
 

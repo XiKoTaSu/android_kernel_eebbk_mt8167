@@ -89,6 +89,8 @@ static void acc_work_func(struct work_struct *work)
 
 	err = cxt->acc_data.get_data(&x, &y, &z, &status);
 
+    if (z==0)
+        ACC_ERR("acc val x=%d,y=%d,z=%d,status=%d\n",x,y,z,status);
 	if (err) {
 		ACC_ERR("get acc data fails!!\n");
 		goto acc_loop;
@@ -111,7 +113,7 @@ static void acc_work_func(struct work_struct *work)
 		if (ACC_INVALID_VALUE == cxt->drv_data.acc_data.values[0] ||
 		    ACC_INVALID_VALUE == cxt->drv_data.acc_data.values[1] ||
 		    ACC_INVALID_VALUE == cxt->drv_data.acc_data.values[2]) {
-			ACC_LOG(" read invalid data\n");
+			ACC_ERR(" read invalid data\n");
 			goto acc_loop;
 
 		}

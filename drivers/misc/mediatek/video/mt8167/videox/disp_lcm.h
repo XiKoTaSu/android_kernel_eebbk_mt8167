@@ -52,7 +52,7 @@ int disp_lcm_esd_check(struct disp_lcm_handle *plcm);
 int disp_lcm_esd_recover(struct disp_lcm_handle *plcm);
 int disp_lcm_suspend(struct disp_lcm_handle *plcm);
 int disp_lcm_resume(struct disp_lcm_handle *plcm);
-int disp_lcm_set_backlight(struct disp_lcm_handle *plcm, int level);
+int disp_lcm_set_backlight(struct disp_lcm_handle *plcm, void *handle, int level);
 int disp_lcm_read_fb(struct disp_lcm_handle *plcm);
 int disp_lcm_ioctl(struct disp_lcm_handle *plcm, LCM_IOCTL ioctl, unsigned int arg);
 int disp_lcm_is_video_mode(struct disp_lcm_handle *plcm);
@@ -60,5 +60,6 @@ int disp_lcm_is_inited(struct disp_lcm_handle *plcm);
 unsigned int disp_lcm_ATA(struct disp_lcm_handle *plcm);
 void *disp_lcm_switch_mode(struct disp_lcm_handle *plcm, int mode);
 int disp_lcm_set_cmd(struct disp_lcm_handle *plcm, void *handle, int *lcm_cmd, unsigned int cmd_num);
+int disp_get_lcm_vendor_id(void);
 
 #endif

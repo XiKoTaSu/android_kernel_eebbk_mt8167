@@ -143,6 +143,29 @@ static struct DDP_IRQ_EVENT_MAPPING ddp_irq_event_list[DEFAULT_IRQ_EVENT_SCENARI
 	 }
 };
 
+// eebbk <liudj> <20170512> add this function for debug begin
+int dpmgr_path_dsi_reset(disp_path_handle dp_handle, int encmdq)
+{
+    int module_name;
+    struct ddp_path_handle *handle;
+    enum DISP_MODULE_ENUM dst_module;
+
+    ASSERT(dp_handle != NULL);
+    handle = (struct ddp_path_handle *)dp_handle;
+    dst_module = ddp_get_dst_module(handle->scenario);
+
+    module_name = dst_module;
+    if (ddp_modules_driver[module_name] != 0) {
+        if (ddp_modules_driver[module_name]->reset!= 0) {
+            DISP_LOG_E(" %s reset\n", ddp_get_module_name(module_name));
+            /* now just 0; */
+            ddp_modules_driver[module_name]->reset(module_name, encmdq ? handle->cmdqhandle : NULL);
+        }
+    }
+
+    return 0;
+}// eebbk <liudj> <20170512> add this function for debug end
+
 static char *path_event_name(enum DISP_PATH_EVENT event)
 {
 	switch (event) {

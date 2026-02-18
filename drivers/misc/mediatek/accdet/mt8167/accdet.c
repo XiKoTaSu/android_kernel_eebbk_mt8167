@@ -89,7 +89,7 @@ static void disable_micbias(unsigned long a);
 /* Used to let accdet know if the pin has been fully plugged-in */
 #define EINT_PIN_PLUG_IN        (1)
 #define EINT_PIN_PLUG_OUT       (0)
-int cur_eint_state = EINT_PIN_PLUG_OUT;
+int cur_eint_state = EINT_PIN_PLUG_IN;	//add by lyq to solve the electric leakage of MICBIAS1
 static struct work_struct accdet_disable_work;
 static struct workqueue_struct *accdet_disable_workqueue;
 #endif/*end CONFIG_ACCDET_EINT*/
@@ -248,7 +248,7 @@ static void accdet_eint_work_callback(struct work_struct *work)
 {
 	/*KE under fastly plug in and plug out*/
 	if (cur_eint_state == EINT_PIN_PLUG_IN) {
-		ACCDET_DEBUG("[Accdet]ACC EINT func :plug-in, cur_eint_state = %d\n", cur_eint_state);
+		ACCDET_INFO("[Accdet]ACC EINT func :plug-in, cur_eint_state = %d\n", cur_eint_state);
 		mutex_lock(&accdet_eint_irq_sync_mutex);
 		eint_accdet_sync_flag = 1;
 		mutex_unlock(&accdet_eint_irq_sync_mutex);
@@ -264,7 +264,7 @@ static void accdet_eint_work_callback(struct work_struct *work)
 	} else {
 /*EINT_PIN_PLUG_OUT*/
 /*Disable ACCDET*/
-		ACCDET_DEBUG("[Accdet]ACC EINT func :plug-out, cur_eint_state = %d\n", cur_eint_state);
+		ACCDET_INFO("[Accdet]ACC EINT func :plug-out, cur_eint_state = %d\n", cur_eint_state);
 		mutex_lock(&accdet_eint_irq_sync_mutex);
 		eint_accdet_sync_flag = 0;
 		mutex_unlock(&accdet_eint_irq_sync_mutex);
@@ -274,40 +274,48 @@ static void accdet_eint_work_callback(struct work_struct *work)
 	}
 	enable_irq(accdet_irq);
 }
-
+//static unsigned int speaker_enable_gpio;
+bool ext_pa_enable = true;
 static irqreturn_t accdet_eint_func(int irq, void *data)
 {
 	ACCDET_INFO("[Accdet]>>>>>>>>>>>>Enter accdet_eint_func.\n");
 	ACCDET_INFO("[Accdet]cur_eint_state = %d\n", cur_eint_state);
 	ACCDET_INFO("[Accdet]current accdet_eint_type = %d\n", accdet_eint_type);
 
-	cur_eint_state = !cur_eint_state;
-
-	if (gpio_get_value(gpiopin)) {
-		ACCDET_INFO("%s: gpio_get_value %d = %d\n", __func__, gpiopin, gpio_get_value(gpiopin));
-		accdet_eint_type = IRQ_TYPE_LEVEL_LOW;
-	} else {
-		ACCDET_INFO("%s: gpio_get_value %d = %d\n", __func__, gpiopin, gpio_get_value(gpiopin));
-		accdet_eint_type = IRQ_TYPE_LEVEL_HIGH;
-	}
-
-	irq_set_irq_type(accdet_irq, accdet_eint_type);
-
-	if (cur_eint_state == EINT_PIN_PLUG_IN) {
-		gpio_set_debounce(gpiopin, accdet_dts_data.accdet_plugout_debounce * 1000);
-		ACCDET_INFO("[Accdet][After] cur_eint_state = %d\n", cur_eint_state);
-	} else{
-		gpio_set_debounce(gpiopin, headsetdebounce);
-	}
-
-	ACCDET_INFO("[Accdet][After] cur_eint_state = %d\n", cur_eint_state);
-	ACCDET_INFO("[Accdet][After] accdet_eint_type = %d\n", accdet_eint_type);
-
 	disable_irq_nosync(accdet_irq);
+	//return IRQ_HANDLED;
+	if (cur_eint_state == EINT_PIN_PLUG_IN) {
+		if (accdet_eint_type == IRQ_TYPE_LEVEL_HIGH)
+			irq_set_irq_type(accdet_irq, IRQ_TYPE_LEVEL_HIGH);
+		else
+			irq_set_irq_type(accdet_irq, IRQ_TYPE_LEVEL_LOW);
+		gpio_set_debounce(gpiopin, headsetdebounce);
+		cur_eint_state = EINT_PIN_PLUG_OUT;
+		// eebbk <BBK_AUDIO_BSP> <20170329> <liudj> add for speaker control begin
+		ext_pa_enable = true;
+		printk("%s plug out  ext_pa=%d\n",__func__, ext_pa_enable);
+		//gpio_set_value(speaker_enable_gpio,1);
+		// eebbk <BBK_AUDIO_BSP> <20170329> <liudj> add for speaker control end
+	} else {
+		if (accdet_eint_type == IRQ_TYPE_LEVEL_HIGH)
+			irq_set_irq_type(accdet_irq, IRQ_TYPE_LEVEL_LOW);
+		else
+			irq_set_irq_type(accdet_irq, IRQ_TYPE_LEVEL_HIGH);
+
+		gpio_set_debounce(gpiopin, accdet_dts_data.accdet_plugout_debounce * 1000);
+		cur_eint_state = EINT_PIN_PLUG_IN;
+		// eebbk <BBK_AUDIO_BSP> <20170329> <liudj> add for speaker control begin
+		ext_pa_enable = false;
+		printk("%s plug in ext_pa=%d\n",__func__, ext_pa_enable);
+		//gpio_set_value(speaker_enable_gpio,0);
+		// eebbk <BBK_AUDIO_BSP> <20170329> <liudj> add for speaker control end
+	}
+//	disable_irq_nosync(accdet_irq);
+	ACCDET_DEBUG("[Accdet]accdet_eint_func after cur_eint_state=%d\n", cur_eint_state);
 
 	queue_work(accdet_eint_workqueue, &accdet_eint_work);
-
 	return IRQ_HANDLED;
+
 }
 
 
@@ -317,6 +325,7 @@ static irqreturn_t accdet_gic_handler(int irq, void *dev_id)
 
 	pr_warn("%s:\n", __func__);
 
+//	return IRQ_HANDLED;
 	ret = accdet_irq_handler();
 	if (ret == 0)
 		ACCDET_DEBUG("[accdet_gic_handler] don't finished\n");
@@ -329,7 +338,7 @@ static inline int accdet_setup_eint(struct platform_device *accdet_device)
 {
 	struct device_node *node = NULL;
 	int ret;
-
+	u32 ints1[2] = { 0, 0 };
 	ACCDET_INFO("[Accdet]accdet_setup_eint\n");
 
 	node = of_find_matching_node(node, accdet_of_match);
@@ -345,11 +354,12 @@ static inline int accdet_setup_eint(struct platform_device *accdet_device)
 		accdet_irq = irq_of_parse_and_map(node, 1);
 		ACCDET_DEBUG("[accdet]accdet_irq=%d\n", accdet_irq);
 
+		of_property_read_u32_array(node, "interrupts", ints1, ARRAY_SIZE(ints1));
 		gpiopin = of_get_named_gpio(node, "accdet-gpio", 0);
 		if (gpiopin < 0)
 			ACCDET_ERROR("[Accdet] not find accdet-gpio\n");
 		headsetdebounce = accdet_dts_data.eint_debounce;
-
+		accdet_eint_type = ints1[1];
 		ret = gpio_request(gpiopin, "accdet-gpio");
 		if (ret)
 			ACCDET_ERROR("gpio_request fail, ret(%d)\n", ret);
@@ -358,7 +368,7 @@ static inline int accdet_setup_eint(struct platform_device *accdet_device)
 		gpio_set_debounce(gpiopin, headsetdebounce);
 		ACCDET_DEBUG("[accdet]gpiopin = %d ,headsetdebounce = %d\n", gpiopin, headsetdebounce);
 
-		ret = request_irq(accdet_irq, accdet_eint_func, IRQ_TYPE_NONE, "ACCDET-eint", NULL);
+		ret = request_irq(accdet_irq, accdet_eint_func, IRQ_TYPE_LEVEL_LOW, "ACCDET-eint", NULL);
 		if (ret > 0)
 			ACCDET_ERROR("[Accdet]EINT IRQ LINE NOT AVAILABLE\n");
 		else
@@ -525,7 +535,6 @@ static inline void clear_accdet_eint_interrupt(void)
 static atomic_t send_event_flag = ATOMIC_INIT(0);
 
 static DECLARE_WAIT_QUEUE_HEAD(send_event_wq);
-
 
 static int accdet_key_event;
 
@@ -888,6 +897,17 @@ void accdet_get_dts_data(void)
 		ACCDET_ERROR("[Accdet] Failed to read AUDIO_CODEC_CON01 value: %d\n", ret);
 		return;
 	}
+
+	// eebbk <BBK_AUDIO_BSP> <20170329> <liudj> add for speaker control begin
+/*
+	speaker_enable_gpio = of_get_named_gpio(node, "speaker_gpio", 0);
+	ret = gpio_request(speaker_enable_gpio,"speaker_enable");
+	if(ret){
+	    ACCDET_ERROR("[Accdet] request speaker_enable_gpio error\n");
+	}
+	gpio_direction_output(speaker_enable_gpio,0);
+*/
+	// eebbk <BBK_AUDIO_BSP> <20170329> <liudj> add for speaker control end
 	ACCDET_INFO("[Accdet] AUDIO_CODEC_CON01  = 0x%x\n", val);
 }
 

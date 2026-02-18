@@ -139,8 +139,13 @@ struct input_dev *fts_input_dev;
 static bool is_update;
 #endif
 #ifdef CONFIG_FT_AUTO_UPGRADE_SUPPORT
+#ifdef CONFIG_MTK_I2C_EXTENSION
 u8 *tpd_i2c_dma_va;
 dma_addr_t tpd_i2c_dma_pa;
+#else
+u8 *tpd_i2c_buff;
+u8 *tpd_i2c_addr;
+#endif
 #endif
 
 
@@ -812,7 +817,7 @@ static ssize_t mtk_ctp_firmware_update_store(struct kobject *kobj, struct kobj_a
 static struct kobj_attribute ctp_firmware_update_attr = {
 	.attr = {
 		.name = "firmware_update",
-		.mode = S_IWUGO,
+		.mode = S_IWUSR,/*S_IWUGO,*/ /*security concern.mediatek modify to 0200*/
 	},
 	.store = &mtk_ctp_firmware_update_store,
 
@@ -899,7 +904,7 @@ static void tpd_down(int x, int y, int p, int id)
 #endif
 
 		input_report_abs(tpd->dev, ABS_MT_TRACKING_ID, id);
-		printk("fts report zuobiao %s x:%d y:%d p:%d\n", __func__, x, y, p);
+		/*printk("fts report zuobiao %s x:%d y:%d p:%d\n", __func__, x, y, p);*/
 		input_report_key(tpd->dev, BTN_TOUCH, 1);
 		input_report_abs(tpd->dev, ABS_MT_TOUCH_MAJOR, 1);
 		input_report_abs(tpd->dev, ABS_MT_POSITION_X, x);
@@ -1050,39 +1055,61 @@ static int tpd_touchinfo(struct touch_info *cinfo, struct touch_info *pinfo)
 int fts_i2c_read(struct i2c_client *client, char *writebuf, int writelen, char *readbuf, int readlen)
 {
 	int ret;
+	u8 *r_buf = NULL;
+
+	r_buf = kzalloc(readlen, GFP_KERNEL);
+	if (r_buf == NULL)
+		return -1;
 
 	if (writelen > 0) {
-		struct i2c_msg msgs[] = {
-			{
-				.addr = client->addr,
-				.flags = 0,
-				.len = writelen,
-				.buf = writebuf,
-			},
-			{
-				.addr = client->addr,
-				.flags = I2C_M_RD,
-				.len = readlen,
-				.buf = readbuf,
-			},
-		};
+		u8 *w_buf = NULL;
+		struct i2c_msg msgs[2];
+
+		memset(msgs, 0, 2 * sizeof(struct i2c_msg));
+		w_buf = kzalloc(writelen, GFP_KERNEL);
+		if (w_buf == NULL) {
+			pr_err("f%s: alloc read buffer error.\n",
+			       __func__);
+
+			kfree(r_buf);
+			return -1;
+		}
+
+		*w_buf = *writebuf;
+
+		msgs[0].addr = client->addr;
+		msgs[0].flags = 0;
+		msgs[0].len = writelen;
+		msgs[0].buf = w_buf;
+
+		msgs[1].addr = client->addr;
+		msgs[1].flags = I2C_M_RD;
+		msgs[1].len = readlen;
+		msgs[1].buf = r_buf;
+
 		ret = i2c_transfer(client->adapter, msgs, 2);
 		if (ret < 0)
 			pr_err("f%s: i2c read error.\n",
 			       __func__);
+
+		memcpy(readbuf, r_buf, readlen);
+		kfree(w_buf);
 	} else {
-		struct i2c_msg msgs[] = {
-			{
-				.addr = client->addr,
-				.flags = I2C_M_RD,
-				.len = readlen,
-				.buf = readbuf,
-			},
-		};
-		ret = i2c_transfer(client->adapter, msgs, 1);
+		struct i2c_msg msg;
+
+		memset(&msg, 0, sizeof(struct i2c_msg));
+		msg.addr = client->addr;
+		msg.flags = I2C_M_RD;
+		msg.len = readlen;
+		msg.buf = r_buf;
+
+		ret = i2c_transfer(client->adapter, &msg, 1);
 		if (ret < 0)
 			pr_err("%s:i2c read error.\n", __func__);
+
+		memcpy(readbuf, r_buf, readlen);
 	}
+	kfree(r_buf);
 	return ret;
 }
 
@@ -1465,7 +1492,7 @@ static int tpd_probe(struct i2c_client *client, const struct i2c_device_id *id)
 	/* msg_dma_alloct(); */
 
 #ifdef CONFIG_FT_AUTO_UPGRADE_SUPPORT
-
+#ifdef CONFIG_MTK_I2C_EXTENSION
 	if (tpd_i2c_dma_va == NULL) {
 		tpd->dev->dev.coherent_dma_mask = DMA_BIT_MASK(32);
 		tpd_i2c_dma_va = (u8 *)dma_alloc_coherent(&tpd->dev->dev, 250, &tpd_i2c_dma_pa, GFP_KERNEL);
@@ -1474,6 +1501,25 @@ static int tpd_probe(struct i2c_client *client, const struct i2c_device_id *id)
 		printk("TPD dma_alloc_coherent error!\n");
 	else
 		printk("TPD dma_alloc_coherent success!\n");
+#else
+	if (tpd_i2c_buff == NULL) {
+		tpd_i2c_buff = kzalloc(250, GFP_KERNEL);
+		if (!tpd_i2c_buff) {
+			pr_err("[DMA][Error] Allocate DMA I2C Buffer failed!\n");
+			return -1;
+		}
+	}
+
+	if (tpd_i2c_addr == NULL) {
+		tpd_i2c_addr = kzalloc(1, GFP_KERNEL);
+		if (!tpd_i2c_addr) {
+			pr_err("[DMA]Allocate DMA I2C addr buf failed!\n");
+			kfree(tpd_i2c_buff);
+			tpd_i2c_buff = NULL;
+			return -1;
+		}
+	}
+#endif
 #endif
 
 #if FTS_GESTRUE_EN
@@ -1630,11 +1676,18 @@ static int tpd_remove(struct i2c_client *client)
 #endif
 
 #ifdef CONFIG_FT_AUTO_UPGRADE_SUPPORT
+#ifdef CONFIG_MTK_I2C_EXTENSION
 	if (tpd_i2c_dma_va) {
 		dma_free_coherent(NULL, 4096, tpd_i2c_dma_va, tpd_i2c_dma_pa);
 		tpd_i2c_dma_va = NULL;
 		tpd_i2c_dma_pa = 0;
 	}
+#else
+	kfree(tpd_i2c_buff);
+	tpd_i2c_buff = NULL;
+	kfree(tpd_i2c_addr);
+	tpd_i2c_addr = NULL;
+#endif
 #endif
 	touch_sysfs_deinit();/* Neostra huangxiaohui add  20160726 */
 	gpio_free(tpd_rst_gpio_number);

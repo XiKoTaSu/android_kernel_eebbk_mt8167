@@ -34,7 +34,7 @@
 #if defined(CONFIG_MTK_S3320) || defined(CONFIG_MTK_S3320_50) \
 	|| defined(CONFIG_MTK_S3320_47) || defined(CONFIG_MTK_MIT200) \
 	|| defined(CONFIG_TOUCHSCREEN_SYNAPTICS_S3528) || defined(CONFIG_MTK_S7020) \
-	|| defined(CONFIG_TOUCHSCREEN_MTK_SYNAPTICS_3320_50)
+	|| defined(CONFIG_TOUCHSCREEN_MTK_SYNAPTICS_3320_50) || defined(CONFIG_TOUCHSCREEN_MTK_GT9XX) 
 #include <linux/input/mt.h>
 #endif /* CONFIG_MTK_S3320 */
 /* for magnify velocity******************************************** */
@@ -46,6 +46,8 @@
 #ifdef CONFIG_COMPAT
 #define COMPAT_TPD_GET_FILTER_PARA _IOWR(TOUCH_IOC_MAGIC, 2, struct tpd_filter_t)
 #endif
+
+
 struct tpd_filter_t tpd_filter;
 struct tpd_dts_info tpd_dts_data;
 struct pinctrl *pinctrl1;
@@ -64,6 +66,7 @@ const struct of_device_id touch_of_match[] = {
 	{ .compatible = "mediatek,mt7623-touch", },
 	{ .compatible = "mediatek,elbrus-touch", },
 	{ .compatible = "mediatek,mt6799-touch", },
+	{ .compatible = "mediatek,mt8167-touch", },
 	{},
 };
 
@@ -72,8 +75,10 @@ void tpd_get_dts_info(void)
 	struct device_node *node1 = NULL;
 	int key_dim_local[16], i;
 
+	printk("[TPD] enter %s, line=%d\n", __func__, __LINE__);
 	node1 = of_find_matching_node(node1, touch_of_match);
 	if (node1) {
+		printk("[TPD] has find the dts node, line=%d\n", __LINE__);
 		of_property_read_u32(node1, "tpd-max-touch-num", &tpd_dts_data.touch_max_num);
 		of_property_read_u32(node1, "use-tpd-button", &tpd_dts_data.use_tpd_button);
 		pr_debug("[tpd]use-tpd-button = %d\n", tpd_dts_data.use_tpd_button);
@@ -107,8 +112,10 @@ void tpd_get_dts_info(void)
 		pr_debug("[tpd]tpd-filter-enable = %d, pixel_density = %d\n",
 					tpd_filter.enable, tpd_filter.pixel_density);
 	} else {
+		printk("[TPD] cannot find the dts node, line=%d\n", __LINE__);
 		pr_err("[tpd]%s can't find touch compatible custom node\n", __func__);
 	}
+	printk("[TPD] leave %s, line=%d\n", __func__, __LINE__);
 }
 
 static DEFINE_MUTEX(tpd_set_gpio_mutex);
@@ -564,12 +571,13 @@ pr_err("Lomen 1\n");
 	set_bit(EV_KEY, tpd->dev->evbit);
 	set_bit(ABS_X, tpd->dev->absbit);
 	set_bit(ABS_Y, tpd->dev->absbit);
-	set_bit(ABS_PRESSURE, tpd->dev->absbit);
+//	set_bit(ABS_PRESSURE, tpd->dev->absbit);
 #if !defined(CONFIG_MTK_S3320) && !defined(CONFIG_MTK_S3320_47)\
 	&& !defined(CONFIG_MTK_S3320_50) && !defined(CONFIG_MTK_MIT200) \
 	&& !defined(CONFIG_TOUCHSCREEN_SYNAPTICS_S3528) && !defined(CONFIG_MTK_S7020) \
-	&& !defined(CONFIG_TOUCHSCREEN_MTK_SYNAPTICS_3320_50)
-	set_bit(BTN_TOUCH, tpd->dev->keybit);
+	&& !defined(CONFIG_TOUCHSCREEN_MTK_SYNAPTICS_3320_50) && !defined(CONFIG_TOUCHSCREEN_MTK_GT9XX)
+//	set_bit(BTN_TOUCH, tpd->dev->keybit);
+//	set_bit(BTN_TOOL_FINGER, tpd->dev->keybit);
 #endif /* CONFIG_MTK_S3320 */
 	set_bit(INPUT_PROP_DIRECT, tpd->dev->propbit);
 
@@ -614,13 +622,15 @@ pr_err("Lomen 1\n");
 		set_bit(ABS_MT_TOUCH_MINOR, tpd->dev->absbit);
 		set_bit(ABS_MT_POSITION_X, tpd->dev->absbit);
 		set_bit(ABS_MT_POSITION_Y, tpd->dev->absbit);
+		printk("LMH: TPD_RES_X = %ld\n",TPD_RES_X);
+		printk("LMH: TPD_RES_Y = %ld\n",TPD_RES_Y);
 		input_set_abs_params(tpd->dev, ABS_MT_POSITION_X, 0, TPD_RES_X, 0, 0);
 		input_set_abs_params(tpd->dev, ABS_MT_POSITION_Y, 0, TPD_RES_Y, 0, 0);
 #if defined(CONFIG_MTK_S3320) || defined(CONFIG_MTK_S3320_47) \
 	|| defined(CONFIG_MTK_S3320_50) || defined(CONFIG_MTK_MIT200) \
 	|| defined(CONFIG_TOUCHSCREEN_SYNAPTICS_S3528) || defined(CONFIG_MTK_S7020) \
-	|| defined(CONFIG_TOUCHSCREEN_MTK_SYNAPTICS_3320_50)
-		input_set_abs_params(tpd->dev, ABS_MT_PRESSURE, 0, 255, 0, 0);
+	|| defined(CONFIG_TOUCHSCREEN_MTK_SYNAPTICS_3320_50) || defined(CONFIG_TOUCHSCREEN_MTK_GT9XX)
+//		input_set_abs_params(tpd->dev, ABS_MT_PRESSURE, 0, 255, 0, 0);
 		input_set_abs_params(tpd->dev, ABS_MT_WIDTH_MAJOR, 0, 15, 0, 0);
 		input_set_abs_params(tpd->dev, ABS_MT_WIDTH_MINOR, 0, 15, 0, 0);
 		input_mt_init_slots(tpd->dev, 10, 0);
@@ -634,7 +644,8 @@ pr_err("Lomen 1\n");
 	input_set_abs_params(tpd->dev, ABS_Y, 0, TPD_RES_Y, 0, 0);
 	input_abs_set_res(tpd->dev, ABS_X, TPD_RES_X);
 	input_abs_set_res(tpd->dev, ABS_Y, TPD_RES_Y);
-	input_set_abs_params(tpd->dev, ABS_PRESSURE, 0, 255, 0, 0);
+
+//	input_set_abs_params(tpd->dev, ABS_PRESSURE, 0, 255, 0, 0);
 	input_set_abs_params(tpd->dev, ABS_MT_TRACKING_ID, 0, 10, 0, 0);
 
 	if (input_register_device(tpd->dev))

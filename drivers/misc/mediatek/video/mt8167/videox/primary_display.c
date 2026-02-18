@@ -22,6 +22,7 @@
 #include <linux/ktime.h>
 #include <linux/of.h>
 #include <linux/of_irq.h>
+#include <linux/of_gpio.h>
 #include <linux/vmalloc.h>
 #include <linux/slab.h>
 
@@ -3414,7 +3415,7 @@ struct task_struct *decouple_fence_release_task;
 wait_queue_head_t decouple_fence_release_wq;
 atomic_t decouple_fence_release_event = ATOMIC_INIT(0);
 
-static int eint_flag;	/* For DCT Setting */
+//static int eint_flag;	/* For DCT Setting */
 
 unsigned int _need_do_esd_check(void)
 {
@@ -3610,89 +3611,51 @@ static irqreturn_t _esd_check_ext_te_irq_handler(int irq, void *data)
 int primary_display_switch_esd_mode(int mode)
 {
 	int ret = 0;
-#ifdef GPIO_DSI_TE_PIN
-	int gpio_mode = 0;
-#endif
+	struct device_node *node = NULL;
+	int irq;
+	u32 ints[2] = { 0, 0 };
 
 	DISPFUNC();
 
 	if (pgc->plcm->params->dsi.customization_esd_check_enable != 0)
 		return -1;	/* avoid build warning. */
 
-	DISPMSG("switch esd mode to %d\n", mode);
+	DISPCHECK("switch esd mode to %d\n", mode);
 
-#ifdef GPIO_DSI_TE_PIN
-#ifndef CONFIG_FPGA_EARLY_PORTING
-	gpio_mode = mt_get_gpio_mode(GPIO_DSI_TE_PIN);
-	/* DISPMSG("[ESD]gpio_mode=%d\n", gpio_mode); */
-#endif
-#endif
 	if (mode == 1) {
-#ifdef GPIO_DSI_TE_PIN
-		/*switch to vdo mode */
-		if (gpio_mode == GPIO_DSI_TE_PIN_M_DSI_TE) {
-#endif
-			/* if(_need_register_eint()) */
-			{
-				/* DISPMSG("[ESD]switch video mode\n"); */
-				struct device_node *node = NULL;
-				int irq;
-				u32 ints[2] = { 0, 0 };
-#ifdef GPIO_DSI_TE_PIN
-#ifndef CONFIG_FPGA_EARLY_PORTING
-				/* 1.set GPIO107 eint mode */
-				mt_set_gpio_mode(GPIO_DSI_TE_PIN, GPIO_DSI_TE_PIN_M_GPIO);
-#endif
-#endif
+		        DISPCHECK("[ESD]switch eint mode\n");
+
 				/* 2.register eint */
 				node = of_find_compatible_node(NULL, NULL, "mediatek, DSI_TE_1-eint");
 				if (node) {
-					/* DISPMSG("node 0x%x\n", node); */
-					of_property_read_u32_array(node, "debounce", ints, ARRAY_SIZE(ints));
-					/* mt_gpio_set_debounce(ints[0], ints[1]); */
-					mt_eint_set_hw_debounce(ints[0], ints[1]);
+			        of_property_read_u32_array(node, "debounce", ints, ARRAY_SIZE(ints));
+			        mt_eint_set_hw_debounce(ints[0], ints[1]);
 
-					irq = irq_of_parse_and_map(node, 0);
-					if (request_irq(irq, _esd_check_ext_te_irq_handler, IRQF_TRIGGER_NONE,
+			        irq = irq_of_parse_and_map(node, 0);
+		            DISPERR("[ESD]switch eint mode irq = %d\n", irq);
+
+			        if (request_irq(irq, _esd_check_ext_te_irq_handler, IRQF_TRIGGER_NONE,
 							"DSI_TE_1-eint", NULL))
 						DISPERR("[ESD]EINT IRQ LINE NOT AVAILABLE!!\n");
 				} else {
 					DISPERR("[ESD][%s] can't find DSI_TE_1 eint compatible node\n", __func__);
 				}
-			}
-#ifdef GPIO_DSI_TE_PIN
-		}
-#endif
 	} else if (mode == 0) {
-#ifdef GPIO_DSI_TE_PIN
-		/* switch to cmd mode */
-		if (gpio_mode == GPIO_DSI_TE_PIN_M_GPIO) {
-#endif
-			struct device_node *node = NULL;
-			int irq;
-			/* DISPMSG("[ESD]switch cmd mode\n"); */
+		    DISPCHECK("[ESD]switch dsi mode\n");
 
 			/* unregister eint */
 			node = of_find_compatible_node(NULL, NULL, "mediatek, DSI_TE_1-eint");
 			/* DISPMSG("node 0x%x\n", node); */
 			if (node) {
 				irq = irq_of_parse_and_map(node, 0);
+		        DISPCHECK("[ESD]switch dsi mode irq = %d\n", irq);
 				free_irq(irq, NULL);
 			} else {
 				DISPERR("[ESD][%s] can't find DSI_TE_1 eint compatible node\n",
 					__func__);
 			}
-#ifdef GPIO_DSI_TE_PIN
-#ifndef CONFIG_FPGA_EARLY_PORTING
-			/* set GPIO107 DSI TE mode */
-			mt_set_gpio_mode(GPIO_DSI_TE_PIN, GPIO_DSI_TE_PIN_M_DSI_TE);
-#endif
-#endif
-#ifdef GPIO_DSI_TE_PIN
-		}
-#endif
 	}
-	/* DISPMSG("primary_display_switch_esd_mode end\n"); */
+	DISPCHECK("primary_display_switch_esd_mode end\n");
 	return ret;
 }
 
@@ -3713,7 +3676,7 @@ int primary_display_esd_check(void)
 		DISPCHECK("[ESD]primary display path is slept?? -- skip esd check\n");
 		_primary_path_unlock(__func__);
 		/* goto done; */
-		DISPCHECK("[ESD]ESD check end\n");
+		DISPCHECK("[ESD]ESD check end sleep\n");
 		mmprofile_log_ex(ddp_mmp_get_events()->esd_check_t, MMPROFILE_FLAG_END, 0, ret);
 		dprec_logger_done(DPREC_LOGGER_ESD_CHECK, 0, 0);
 		_primary_path_esd_check_unlock();
@@ -3731,6 +3694,7 @@ int primary_display_esd_check(void)
 
 			/* use cmdq to pull DSI clk lane*/
 			if (primary_display_cmdq_enabled()) {
+                DISPCHECK("hgc 1\n");
 				_primary_path_lock(__func__);
 
 				/* 0.create esd check cmdq */
@@ -3779,14 +3743,16 @@ int primary_display_esd_check(void)
 			}
 
 			if (_need_register_eint()) {
+                DISPCHECK("hgc 2\n");
 				mmprofile_log_ex(ddp_mmp_get_events()->esd_extte, MMPROFILE_FLAG_PULSE, 1, 1);
 
 				if (wait_event_interruptible_timeout
 				    (esd_ext_te_wq, atomic_read(&esd_ext_te_event), HZ / 2) > 0) {
 					ret = 0; /* esd check pass */
+					DISPERR("esd check pass\n");
 				} else {
 					ret = 1; /* esd check fail */
-					DISPCHECK("esd check fail release fence fake\n");
+					DISPERR("esd check fail release fence fake\n");
 					primary_display_release_fence_fake();
 				}
 				atomic_set(&esd_ext_te_event, 0);
@@ -3798,7 +3764,7 @@ int primary_display_esd_check(void)
 				ret = 0; /* esd check pass */
 			} else {
 				ret = 1; /* esd check fail */
-				DISPCHECK("esd check fail release fence fake\n");
+				DISPERR("esd check fail release fence fake\n");
 				primary_display_release_fence_fake();
 			}
 		}
@@ -3824,7 +3790,7 @@ int primary_display_esd_check(void)
 			ret = _esd_check_config_handle_cmd();
 
 		mmprofile_log_ex(ddp_mmp_get_events()->esd_rdlcm, MMPROFILE_FLAG_PULSE,
-				 primary_display_is_video_mode(), 3);
+				 primary_display_is_video_mode(), 3);	
 		if (ret == 1) {/* cmdq fail */
 			/* Need set esd check eof synctoken to let trigger loop go. */
 			if (_need_wait_esd_eof())
@@ -3832,7 +3798,7 @@ int primary_display_esd_check(void)
 
 			/* do dsi reset */
 			dpmgr_path_build_cmdq(pgc->dpmgr_handle, pgc->cmdq_handle_config_esd, CMDQ_DSI_RESET);
-			DISPCHECK("esd check fail release fence fake\n");
+			DISPERR("esd check fail3 release fence fake\n");
 			primary_display_release_fence_fake();
 			goto destroy_cmdq;
 		}
@@ -3842,9 +3808,10 @@ int primary_display_esd_check(void)
 		/* 2.check data(*cpu check now) */
 		ret = dpmgr_path_build_cmdq(pgc->dpmgr_handle, pgc->cmdq_handle_config_esd, CMDQ_ESD_CHECK_CMP);
 		mmprofile_log_ex(ddp_mmp_get_events()->esd_rdlcm, MMPROFILE_FLAG_PULSE, 0, 4);
+		DISPERR("[ESD]ESD cpu check->ret = %d\n", ret);
 		if (ret) {
 			ret = 1;	/* esd check fail */
-			DISPCHECK("esd check fail release fence fake\n");
+			DISPCHECK("esd check fail4 release fence fake\n");
 			primary_display_release_fence_fake();
 		}
 
@@ -3919,7 +3886,7 @@ done:
 #ifdef MTK_DISP_IDLE_LP
 	_disp_primary_path_dsi_clock_off(0);
 #endif
-	DISPCHECK("[ESD]ESD check end\n");
+	DISPCHECK("[ESD]ESD check end->ret = %d\n", ret);
 	mmprofile_log_ex(ddp_mmp_get_events()->esd_check_t, MMPROFILE_FLAG_END, 0, ret);
 	dprec_logger_done(DPREC_LOGGER_ESD_CHECK, 0, 0);
 	_primary_path_esd_check_unlock();
@@ -3957,24 +3924,24 @@ static int primary_display_esd_check_worker_kthread(void *data)
 		_primary_path_cmd_lock();
 		ret = primary_display_esd_check();
 		if (ret == 1) {
-			DISPCHECK("[ESD]esd check fail, will do esd recovery %d\n", ret);
+			DISPERR("[ESD]esd check fail, will do esd recovery %d\n", ret);
 			i = esd_try_cnt;
 			while (i--) {
-				DISPCHECK("[ESD]esd recovery try:%d\n", i);
+				DISPERR("[ESD]esd recovery try:%d\n", i);
 				primary_display_esd_recovery();
 				ret = primary_display_esd_check();
 				if (ret == 0) {
-					DISPCHECK("[ESD]esd recovery success\n");
+					DISPERR("[ESD]esd recovery success\n");
 					break;
 				}
-				DISPCHECK("[ESD]after esd recovery, esd check still fail\n");
+				DISPERR("[ESD]after esd recovery, esd check still fail\n");
 				if (i == 0) {
-					DISPCHECK("[ESD]after esd recovery %d times, esd check still fail,\n",
+					DISPERR("[ESD]after esd recovery %d times, esd check still fail,\n",
 						  esd_try_cnt);
-					DISPCHECK("disable esd check\n");
+					DISPERR("disable esd check\n");
 					primary_display_esd_check_enable(0);
 				}
-			}
+			}			
 		}
 		_primary_path_cmd_unlock();
 #ifdef DISP_SWITCH_DST_MODE
@@ -4047,6 +4014,8 @@ int primary_display_esd_recovery(void)
 
 	DISPCHECK("[POWER]lcm suspend[begin]\n");
 	disp_lcm_suspend(pgc->plcm);
+    if (pgc->plcm->drv->suspend_power)
+        pgc->plcm->drv->suspend_power();
 	DISPCHECK("[POWER]lcm suspend[end]\n");
 
 	mmprofile_log_ex(ddp_mmp_get_events()->esd_recovery_t, MMPROFILE_FLAG_PULSE, 0, 7);
@@ -4059,7 +4028,10 @@ int primary_display_esd_recovery(void)
 	mmprofile_log_ex(ddp_mmp_get_events()->esd_recovery_t, MMPROFILE_FLAG_PULSE, 0, 8);
 
 	DISPCHECK("[ESD]lcm force init[begin]\n");
-	disp_lcm_init(pgc->plcm, 1);
+//	disp_lcm_init(pgc->plcm, 1);
+	if (pgc->plcm->drv->resume_power)
+	    pgc->plcm->drv->resume_power();
+	disp_lcm_resume(pgc->plcm);
 	DISPCHECK("[ESD]lcm force init[end]\n");
 
 	mmprofile_log_ex(ddp_mmp_get_events()->esd_recovery_t, MMPROFILE_FLAG_PULSE, 0, 9);
@@ -4106,13 +4078,8 @@ void primary_display_esd_check_enable(int enable)
 	}
 
 	if (_need_do_esd_check()) {
-		if (_need_register_eint() && eint_flag != 2) {
-			DISPCHECK("[ESD]Please check DCT setting about GPIO107/EINT107\n");
-			return;
-		}
-
 		if (enable) {
-			DISPPRINT("[ESD]esd check thread wakeup\n");
+			DISPCHECK("[ESD]esd check thread wakeup\n");
 			atomic_set(&esd_check_task_wakeup, 1);
 			wake_up_interruptible(&esd_check_task_wq);
 		} else {
@@ -5475,25 +5442,11 @@ int primary_display_init(char *lcm_name, unsigned int lcm_fps)
 	if (_need_do_esd_check())
 		wake_up_process(primary_display_esd_check_task);
 #if 0
-	if (_need_do_esd_check())
-		primary_display_esd_check_enable(1);
-#endif
-
 	if (_need_register_eint()) {
 		struct device_node *node = NULL;
 		int irq;
 		u32 ints[2] = { 0, 0 };
-#ifdef GPIO_DSI_TE_PIN
-#ifndef CONFIG_FPGA_EARLY_PORTING
-		/* 1.set GPIO107 eint mode */
-		mt_set_gpio_mode(GPIO_DSI_TE_PIN, GPIO_DSI_TE_PIN_M_GPIO);
-#endif
-		eint_flag++;
-#endif
 
-#ifndef CONFIG_MTK_LEGACY
-		eint_flag++;
-#endif
 		/* 2.register eint */
 		node = of_find_compatible_node(NULL, NULL, "mediatek, DSI_TE_1-eint");
 		if (node) {
@@ -5504,18 +5457,13 @@ int primary_display_init(char *lcm_name, unsigned int lcm_fps)
 			irq = irq_of_parse_and_map(node, 0);
 			if (request_irq(irq, _esd_check_ext_te_irq_handler, IRQF_TRIGGER_NONE, "DSI_TE_1-eint", NULL))
 				DISPCHECK("[ESD]EINT IRQ LINE NOT AVAILABLE!!\n");
-			else
-				eint_flag++;
-
 		} else {
 			DISPCHECK("[ESD][%s] can't find DSI_TE_1 eint compatible node\n", __func__);
 		}
 	}
-
-
+#endif
 	if (_need_do_esd_check())
 		primary_display_esd_check_enable(1);
-
 #endif
 #ifdef DISP_SWITCH_DST_MODE
 	primary_display_switch_dst_mode_task = kthread_create(_disp_primary_path_switch_dst_mode_thread, NULL,
@@ -5944,6 +5892,9 @@ int primary_display_suspend(void)
 	dpmgr_path_power_off(pgc->dpmgr_handle, CMDQ_DISABLE);
 	DISPCHECK("[POWER]dpmanager path power off[end]\n");
 
+    if (pgc->plcm->drv->suspend_power)
+        pgc->plcm->drv->suspend_power();
+
 	if (_is_decouple_mode(pgc->session_mode) && !pgc->force_on_wdma_path)
 		dpmgr_path_power_off(pgc->ovl2mem_path_handle, CMDQ_DISABLE);
 
@@ -6011,15 +5962,19 @@ int primary_display_resume(void)
 
 	_primary_path_lock(__func__);
 	if (pgc->state == DISP_ALIVE) {
-		DISPCHECK("primary display path is already resume, skip\n");
+		DISPERR("primary display path is already resume, skip\n");
 		goto done;
 	}
 	mmprofile_log_ex(ddp_mmp_get_events()->primary_resume, MMPROFILE_FLAG_PULSE, 0, 1);
+
+    if (pgc->plcm->drv->resume_power)
+        pgc->plcm->drv->resume_power();
 
 #ifdef CONFIG_MTK_CLKMGR
 #ifdef CONFIG_SINGLE_PANEL_OUTPUT
 	dpmgr_reset_module_handle(pgc->dpmgr_handle);
 #endif
+
 	/* For CCF, we move the power on control to noirq_restore in mtkfb */
 	DISPCHECK("dpmanager path power on[begin]\n");
 	dpmgr_path_power_on(pgc->dpmgr_handle, CMDQ_DISABLE);
@@ -6127,6 +6082,7 @@ int primary_display_resume(void)
 	if (dpmgr_path_is_busy(pgc->dpmgr_handle)) {
 		mmprofile_log_ex(ddp_mmp_get_events()->primary_resume, MMPROFILE_FLAG_PULSE, 1, 4);
 		DISPERR("[POWER]Fatal error, we didn't start display path but it's already busy\n");
+                dpmgr_path_dsi_reset(pgc->dpmgr_handle, CMDQ_DISABLE);// eebbk <liudj> <20170512> add log for debug
 		ret = -1;
 		/* goto done; */
 	}
@@ -6144,6 +6100,7 @@ int primary_display_resume(void)
 		mmprofile_log_ex(ddp_mmp_get_events()->primary_resume, MMPROFILE_FLAG_PULSE, 1, 6);
 		DISPERR
 		    ("[POWER]Fatal error, we didn't trigger display path but it's already busy\n");
+                dpmgr_path_dsi_reset(pgc->dpmgr_handle, CMDQ_DISABLE);// eebbk <liudj> <20170512> add log for debug
 		ret = -1;
 		/* goto done; */
 	}
@@ -6211,7 +6168,7 @@ int primary_display_resume(void)
 done:
 	_primary_path_unlock(__func__);
 
-	pr_err("primary_display_resume end\n");
+//	pr_err("primary_display_resume end\n");
 
 	/* primary_display_diagnose(); */
 #ifndef DISP_NO_AEE
@@ -6219,11 +6176,11 @@ done:
 #endif
 	mmprofile_log_ex(ddp_mmp_get_events()->primary_resume, MMPROFILE_FLAG_END, 0, 0);
 
-	ddp_dump_analysis(DISP_MODULE_OVL0);
+//	ddp_dump_analysis(DISP_MODULE_OVL0);
 #if defined(OVL_CASCADE_SUPPORT)
-	ddp_dump_analysis(DISP_MODULE_OVL1);
+//	ddp_dump_analysis(DISP_MODULE_OVL1);
 #endif
-	ddp_dump_analysis(DISP_MODULE_RDMA0);
+//	ddp_dump_analysis(DISP_MODULE_RDMA0);
 
 	return 0;
 }
@@ -7942,6 +7899,7 @@ int _set_backlight_by_cmdq(unsigned int level)
 	mmprofile_log_ex(ddp_mmp_get_events()->primary_set_bl, MMPROFILE_FLAG_PULSE, 1, 1);
 	ret = cmdqRecCreate(CMDQ_SCENARIO_PRIMARY_DISP, &cmdq_handle_backlight);
 	DISPCHECK("primary backlight, handle=%p\n", cmdq_handle_backlight);
+
 	if (ret != 0) {
 		DISPCHECK("fail to create primary cmdq handle for backlight\n");
 		return -1;
@@ -7953,7 +7911,7 @@ int _set_backlight_by_cmdq(unsigned int level)
 		dpmgr_path_ioctl(pgc->dpmgr_handle, cmdq_handle_backlight, DDP_BACK_LIGHT,
 				 (unsigned long *)&level);
 		_cmdq_flush_config_handle_mira(cmdq_handle_backlight, 1);
-		DISPCHECK("[BL]_set_backlight_by_cmdq ret=%d\n", ret);
+		DISPCHECK("[BL]_set_backlight_by_cmdq video->ret=%d\n", ret);
 	} else {
 		mmprofile_log_ex(ddp_mmp_get_events()->primary_set_bl, MMPROFILE_FLAG_PULSE, 1, 3);
 		cmdqRecReset(cmdq_handle_backlight);
@@ -7965,7 +7923,7 @@ int _set_backlight_by_cmdq(unsigned int level)
 		mmprofile_log_ex(ddp_mmp_get_events()->primary_set_bl, MMPROFILE_FLAG_PULSE, 1, 4);
 		_cmdq_flush_config_handle_mira(cmdq_handle_backlight, 1);
 		mmprofile_log_ex(ddp_mmp_get_events()->primary_set_bl, MMPROFILE_FLAG_PULSE, 1, 6);
-		DISPCHECK("[BL]_set_backlight_by_cmdq ret=%d\n", ret);
+		DISPCHECK("[BL]_set_backlight_by_cmdq cmd->ret=%d\n", ret);
 	}
 	cmdqRecDestroy(cmdq_handle_backlight);
 	cmdq_handle_backlight = NULL;
@@ -7979,7 +7937,7 @@ int _set_backlight_by_cpu(unsigned int level)
 
 	mmprofile_log_ex(ddp_mmp_get_events()->primary_set_bl, MMPROFILE_FLAG_PULSE, 0, 1);
 	if (primary_display_is_video_mode()) {
-		disp_lcm_set_backlight(pgc->plcm, level);
+		disp_lcm_set_backlight(pgc->plcm, NULL, level);
 	} else {
 		DISPCHECK("[BL]display cmdq trigger loop stop[begin]\n");
 		_cmdq_stop_trigger_loop();
@@ -8006,7 +7964,7 @@ int _set_backlight_by_cpu(unsigned int level)
 
 		mmprofile_log_ex(ddp_mmp_get_events()->primary_set_bl, MMPROFILE_FLAG_PULSE, 0, 2);
 
-		disp_lcm_set_backlight(pgc->plcm, level);
+		disp_lcm_set_backlight(pgc->plcm, NULL, level);
 
 		mmprofile_log_ex(ddp_mmp_get_events()->primary_set_bl, MMPROFILE_FLAG_PULSE, 0, 3);
 
@@ -8027,6 +7985,7 @@ int primary_display_setbacklight(unsigned int level)
 	int ret = 0;
 
 	DISPFUNC();
+
 	mmprofile_log_ex(ddp_mmp_get_events()->primary_set_bl, MMPROFILE_FLAG_START, 0, 0);
 #ifdef DISP_SWITCH_DST_MODE
 	_primary_path_switch_dst_lock();
@@ -8041,7 +8000,7 @@ int primary_display_setbacklight(unsigned int level)
 			if (primary_display_is_video_mode()) {
 				mmprofile_log_ex(ddp_mmp_get_events()->primary_set_bl,
 					       MMPROFILE_FLAG_PULSE, 0, 7);
-				disp_lcm_set_backlight(pgc->plcm, level);
+				disp_lcm_set_backlight(pgc->plcm, NULL, level);
 			} else {
 #ifdef MTK_DISP_IDLE_LP
 				/* CMD mode need to exit top clock off idle mode */

@@ -20,6 +20,7 @@
 #include <debug.h>
 #include "disp_drv_log.h"
 #include "disp_drv_platform.h"
+#include <asm/traps.h>
 
 #include <linux/sched.h>
 #include <linux/interrupt.h>
@@ -224,10 +225,11 @@ static bool wait_vm_cmd_done;
 static bool wait_sleep_out_done;
 static int s_isDsiPowerOn;
 static int dsi_currect_mode;
-static int dsi_force_config;
+static int dsi_force_config = 0;
 static bool dsi_glitch_enable;
 LCM_DSI_PARAMS dsi_lcm_params;
 struct cmdqRecStruct *cmdq_forcb;
+static bool g_dsi_init;
 
 static void _DSI_INTERNAL_IRQ_Handler(enum DISP_MODULE_ENUM module, unsigned int param)
 {
@@ -1643,176 +1645,193 @@ enum DSI_STATUS DSI_EnableVM_CMD(enum DISP_MODULE_ENUM module, struct cmdqRecStr
 
 /* return value: the data length we got */
 uint32_t DSI_dcs_read_lcm_reg_v2(enum DISP_MODULE_ENUM module, void *cmdq, uint8_t cmd,
-	uint8_t *buffer, uint8_t buffer_size)
+    uint8_t *buffer, uint8_t buffer_size)
 {
-	uint32_t max_try_count = 5;
-	uint32_t recv_data_cnt;
-	unsigned int read_timeout_ms;
-	unsigned char packet_type;
-	struct DSI_RX_DATA_REG read_data0;
-	struct DSI_RX_DATA_REG read_data1;
-	struct DSI_RX_DATA_REG read_data2;
-	struct DSI_RX_DATA_REG read_data3;
-	int i = 0;
-	struct DSI_T0_INS t0;
+    uint32_t max_try_count = 5;
+    uint32_t recv_data_cnt;
+    unsigned int read_timeout_ms;
+    unsigned char packet_type;
+    struct DSI_RX_DATA_REG read_data0;
+    struct DSI_RX_DATA_REG read_data1;
+    struct DSI_RX_DATA_REG read_data2;
+    struct DSI_RX_DATA_REG read_data3;
+    int i = 0;
+    struct DSI_T0_INS t0;
+    int timeout = 0;
 
 #if ENABLE_DSI_INTERRUPT
-	static const long WAIT_TIMEOUT = HZ / 2;
-	long ret;
+    static const long WAIT_TIMEOUT = HZ / 2;
+    long ret;
 #endif
-	if (DSI_REG[i]->DSI_MODE_CTRL.MODE)
-		return 0;
+    if (DSI_REG[i]->DSI_MODE_CTRL.MODE)
+        return 0;
 
-	if (buffer == NULL || buffer_size == 0)
-		return 0;
+    if (buffer == NULL || buffer_size == 0)
+        return 0;
 
-	do {
-		if (max_try_count == 0)
-			return 0;
-		max_try_count--;
-		recv_data_cnt = 0;
-		read_timeout_ms = 20;
+    do {
+        if (max_try_count == 0)
+            return 0;
+        max_try_count--;
+        recv_data_cnt = 0;
+        read_timeout_ms = 20;
 
-		DSI_WaitForNotBusy(module, cmdq);
+        DSI_WaitForNotBusy(module, cmdq);
 
-		t0.CONFG = 0x04;	/* BTA */
-		t0.Data0 = cmd;
-		if (buffer_size < 0x3)
-			t0.Data_ID = DSI_DCS_READ_PACKET_ID;
-		else
-			t0.Data_ID = DSI_GERNERIC_READ_LONG_PACKET_ID;
-		t0.Data1 = 0;
+        DSI_OUTREGBIT(cmdq, struct DSI_INT_STATUS_REG, DSI_REG[i]->DSI_INTSTA, RD_RDY, 0);
+        DSI_OUTREGBIT(cmdq, struct DSI_INT_STATUS_REG, DSI_REG[i]->DSI_INTSTA, CMD_DONE, 0);
+        DSI_OUTREGBIT(cmdq, struct DSI_INT_ENABLE_REG, DSI_REG[i]->DSI_INTEN, RD_RDY, 1);
+        DSI_OUTREGBIT(cmdq, struct DSI_INT_ENABLE_REG, DSI_REG[i]->DSI_INTEN, CMD_DONE, 1);
 
-		DSI_OUTREG32(cmdq, &DSI_CMDQ_REG[i]->data[0], AS_UINT32(&t0));
-		DSI_OUTREG32(cmdq, &DSI_REG[i]->DSI_CMDQ_SIZE, 1);
+        t0.CONFG = 0x04;    /* BTA */
+        t0.Data0 = cmd;
+        if (buffer_size < 0x3)
+            t0.Data_ID = DSI_DCS_READ_PACKET_ID;
+        else
+            t0.Data_ID = DSI_GERNERIC_READ_LONG_PACKET_ID;
+        t0.Data1 = 0;
 
-		DSI_OUTREGBIT(cmdq, struct DSI_RACK_REG, DSI_REG[i]->DSI_RACK, DSI_RACK, 1);
-		DSI_OUTREGBIT(cmdq, struct DSI_INT_STATUS_REG, DSI_REG[i]->DSI_INTSTA, RD_RDY, 1);
-		DSI_OUTREGBIT(cmdq, struct DSI_INT_STATUS_REG, DSI_REG[i]->DSI_INTSTA, CMD_DONE, 1);
-		DSI_OUTREGBIT(cmdq, struct DSI_INT_ENABLE_REG, DSI_REG[i]->DSI_INTEN, RD_RDY, 1);
-		DSI_OUTREGBIT(cmdq, struct DSI_INT_ENABLE_REG, DSI_REG[i]->DSI_INTEN, CMD_DONE, 1);
+        DSI_OUTREG32(cmdq, &DSI_CMDQ_REG[i]->data[0], AS_UINT32(&t0));
+        DSI_OUTREG32(cmdq, &DSI_REG[i]->DSI_CMDQ_SIZE, 1);
 
-		DSI_OUTREG32(cmdq, &DSI_REG[i]->DSI_START, 0);
-		DSI_OUTREG32(cmdq, &DSI_REG[i]->DSI_START, 1);
+        DSI_OUTREG32(cmdq, &DSI_REG[i]->DSI_START, 0);
+        DSI_OUTREG32(cmdq, &DSI_REG[i]->DSI_START, 1);
 #if ENABLE_DSI_INTERRUPT
-		ret = wait_event_interruptible_timeout(_dsi_dcs_read_wait_queue[i],
-						       waitRDDone, WAIT_TIMEOUT);
-		waitRDDone = false;
-		if (ret == 0) {
-			DDPMSG(" Wait for DSI engine read ready timeout!!!\n");
+        ret = wait_event_interruptible_timeout(_dsi_dcs_read_wait_queue[i],
+                         waitRDDone, WAIT_TIMEOUT);
+        waitRDDone = false;
+        if (ret > 0) {
+            do {
+                timeout++;
+                udelay(1);
+                DSI_OUTREGBIT(cmdq, struct DSI_RACK_REG, DSI_REG[i]->DSI_RACK, DSI_RACK, 1);
+                } while (DSI_REG[i]->DSI_INTSTA.BUSY && (timeout < 1000));
+            if (timeout == 1000) {
+                /* wait cmd done timeout */
+                DISPERR("DSI Read Fail: dsi wait cmd done timeout\n");
+                DSI_DumpRegisters(module, 2);
+                /* /do necessary reset here */
+                DSI_OUTREGBIT(cmdq, struct DSI_RACK_REG, DSI_REG[i]->DSI_RACK, DSI_RACK, 1);
+                DSI_Reset(module, NULL);
+                /* clear rd rdy interrupt */
+                DSI_OUTREGBIT(cmdq, struct DSI_INT_ENABLE_REG, DSI_REG[i]->DSI_INTSTA, RD_RDY, 0);
+                return 0;
+            }
+        } else {
+            DDPMSG(" Wait for DSI engine read ready fail!!!\n");
 
-			DSI_DumpRegisters(module, 1);
+            DSI_DumpRegisters(module, 1);
 
-			DSI_OUTREGBIT(cmdq, struct DSI_RACK_REG, DSI_REG[i]->DSI_RACK, DSI_RACK, 1);
-			DSI_Reset(module, NULL);
+            DSI_OUTREGBIT(cmdq, struct DSI_RACK_REG, DSI_REG[i]->DSI_RACK, DSI_RACK, 1);
+            DSI_Reset(module, NULL);
 
-			return 0;
-		}
+            return 0;
+        }
 #else
-		DDPMSG(" Start polling DSI read ready!!!\n");
-		while (DSI_REG[i]->DSI_INTSTA.RD_RDY == 0) {
-			msleep(20);
-			read_timeout_ms--;
+        DDPMSG(" Start polling DSI read ready!!!\n");
+        while (DSI_REG[i]->DSI_INTSTA.RD_RDY == 0) {
+            msleep(20);
+            read_timeout_ms--;
 
-			if (read_timeout_ms == 0) {
-				DDPMSG(" Polling DSI read ready timeout!!!\n");
-				DSI_DumpRegisters(module, 1);
-				DSI_OUTREGBIT(cmdq, struct DSI_RACK_REG, DSI_REG[i]->DSI_RACK, DSI_RACK, 1);
-				DSI_Reset(module, NULL);
-				return 0;
-			}
-		}
+            if (read_timeout_ms == 0) {
+                DDPMSG(" Polling DSI read ready timeout!!!\n");
+                DSI_DumpRegisters(module, 1);
+                DSI_OUTREGBIT(cmdq, struct DSI_RACK_REG, DSI_REG[i]->DSI_RACK, DSI_RACK, 1);
+                DSI_Reset(module, NULL);
+                return 0;
+            }
+        }
 #ifdef DDI_DRV_DEBUG_LOG_ENABLE
-		if (dsi_log_on)
-			DDPMSG(" End polling DSI read ready!!!\n");
+        if (dsi_log_on)
+            DDPMSG(" End polling DSI read ready!!!\n");
 #endif
 
-		DSI_OUTREGBIT(cmdq, struct DSI_RACK_REG, DSI_REG[i]->DSI_RACK, DSI_RACK, 1);
+        DSI_OUTREGBIT(cmdq, struct DSI_RACK_REG, DSI_REG[i]->DSI_RACK, DSI_RACK, 1);
 
-		DSI_OUTREGBIT(cmdq, struct DSI_INT_STATUS_REG, DSI_REG[i]->DSI_INTSTA, RD_RDY, 1);
-		DSI_OUTREG32(cmdq, &DSI_REG[i]->DSI_START, 0);
-
+        DSI_OUTREGBIT(cmdq, struct DSI_INT_STATUS_REG, DSI_REG[i]->DSI_INTSTA, RD_RDY, 1);
+        DSI_OUTREG32(cmdq, &DSI_REG[i]->DSI_START, 0);
 #endif
 
-		DSI_OUTREGBIT(cmdq, struct DSI_INT_ENABLE_REG, DSI_REG[i]->DSI_INTEN, RD_RDY, 1);
+        DSI_OUTREGBIT(cmdq, struct DSI_INT_STATUS_REG, DSI_REG[i]->DSI_INTSTA, RD_RDY, 0);
+        DSI_OUTREGBIT(cmdq, struct DSI_INT_STATUS_REG, DSI_REG[i]->DSI_INTSTA, CMD_DONE, 0);
 
-		DSI_OUTREG32(cmdq, &read_data0, AS_UINT32(&DSI_REG[i]->DSI_RX_DATA0));
-		DSI_OUTREG32(cmdq, &read_data1, AS_UINT32(&DSI_REG[i]->DSI_RX_DATA1));
-		DSI_OUTREG32(cmdq, &read_data2, AS_UINT32(&DSI_REG[i]->DSI_RX_DATA2));
-		DSI_OUTREG32(cmdq, &read_data3, AS_UINT32(&DSI_REG[i]->DSI_RX_DATA3));
+        DSI_OUTREG32(cmdq, &read_data0, AS_UINT32(&DSI_REG[i]->DSI_RX_DATA0));
+        DSI_OUTREG32(cmdq, &read_data1, AS_UINT32(&DSI_REG[i]->DSI_RX_DATA1));
+        DSI_OUTREG32(cmdq, &read_data2, AS_UINT32(&DSI_REG[i]->DSI_RX_DATA2));
+        DSI_OUTREG32(cmdq, &read_data3, AS_UINT32(&DSI_REG[i]->DSI_RX_DATA3));
 #ifdef DDI_DRV_DEBUG_LOG_ENABLE
-		DDPMSG(" DSI_CMDQ_SIZE : 0x%x\n",
-			       DSI_REG[i]->DSI_CMDQ_SIZE.CMDQ_SIZE);
-		DDPMSG(" DSI_CMDQ_DATA0 : 0x%x\n",
-			       DSI_CMDQ_REG[i]->data[0].byte0);
-		DDPMSG(" DSI_CMDQ_DATA1 : 0x%x\n",
-			       DSI_CMDQ_REG[i]->data[0].byte1);
-		DDPMSG(" DSI_CMDQ_DATA2 : 0x%x\n",
-			       DSI_CMDQ_REG[i]->data[0].byte2);
-		DDPMSG(" DSI_CMDQ_DATA3 : 0x%x\n",
-			       DSI_CMDQ_REG[i]->data[0].byte3);
-		DDPMSG(" DSI_RX_DATA0 : 0x%x\n",
-			       *((uint32_t *)(&DSI_REG[i]->DSI_RX_DATA0)));
-		DDPMSG(" DSI_RX_DATA1 : 0x%x\n",
-			       *((uint32_t *)(&DSI_REG[i]->DSI_RX_DATA1)));
-		DDPMSG(" DSI_RX_DATA2 : 0x%x\n",
-			       *((uint32_t *)(&DSI_REG[i]->DSI_RX_DATA2)));
-		DDPMSG(" DSI_RX_DATA3 : 0x%x\n",
-			       *((uint32_t *)(&DSI_REG[i]->DSI_RX_DATA3)));
+        DDPMSG(" DSI_CMDQ_SIZE : 0x%x\n",
+             DSI_REG[i]->DSI_CMDQ_SIZE.CMDQ_SIZE);
+        DDPMSG(" DSI_CMDQ_DATA0 : 0x%x\n",
+             DSI_CMDQ_REG[i]->data[0].byte0);
+        DDPMSG(" DSI_CMDQ_DATA1 : 0x%x\n",
+             DSI_CMDQ_REG[i]->data[0].byte1);
+        DDPMSG(" DSI_CMDQ_DATA2 : 0x%x\n",
+             DSI_CMDQ_REG[i]->data[0].byte2);
+        DDPMSG(" DSI_CMDQ_DATA3 : 0x%x\n",
+             DSI_CMDQ_REG[i]->data[0].byte3);
+        DDPMSG(" DSI_RX_DATA0 : 0x%x\n",
+             *((uint32_t *)(&DSI_REG[i]->DSI_RX_DATA0)));
+        DDPMSG(" DSI_RX_DATA1 : 0x%x\n",
+             *((uint32_t *)(&DSI_REG[i]->DSI_RX_DATA1)));
+        DDPMSG(" DSI_RX_DATA2 : 0x%x\n",
+             *((uint32_t *)(&DSI_REG[i]->DSI_RX_DATA2)));
+        DDPMSG(" DSI_RX_DATA3 : 0x%x\n",
+             *((uint32_t *)(&DSI_REG[i]->DSI_RX_DATA3)));
 
-		DDPMSG("read_data0, %x,%x,%x,%x\n", read_data0.byte0, read_data0.byte1,
-			read_data0.byte2, read_data0.byte3);
-		DDPMSG("read_data1, %x,%x,%x,%x\n", read_data1.byte0, read_data1.byte1,
-			read_data1.byte2, read_data1.byte3);
-		DDPMSG("read_data2, %x,%x,%x,%x\n", read_data2.byte0, read_data2.byte1,
-			read_data2.byte2, read_data2.byte3);
-		DDPMSG("read_data3, %x,%x,%x,%x\n", read_data3.byte0, read_data3.byte1,
-			read_data3.byte2, read_data3.byte3);
+        DDPMSG("read_data0, %x,%x,%x,%x\n", read_data0.byte0, read_data0.byte1,
+            read_data0.byte2, read_data0.byte3);
+        DDPMSG("read_data1, %x,%x,%x,%x\n", read_data1.byte0, read_data1.byte1,
+            read_data1.byte2, read_data1.byte3);
+        DDPMSG("read_data2, %x,%x,%x,%x\n", read_data2.byte0, read_data2.byte1,
+            read_data2.byte2, read_data2.byte3);
+        DDPMSG("read_data3, %x,%x,%x,%x\n", read_data3.byte0, read_data3.byte1,
+            read_data3.byte2, read_data3.byte3);
 #endif
 
-		packet_type = read_data0.byte0;
+        packet_type = read_data0.byte0;
 
 #ifdef DDI_DRV_DEBUG_LOG_ENABLE
-		if (dsi_log_on)
-			DDPMSG(" DSI read packet_type is 0x%x\n", packet_type);
+        if (dsi_log_on)
+            DDPMSG(" DSI read packet_type is 0x%x\n", packet_type);
 #endif
 
-		if (packet_type == 0x1A || packet_type == 0x1C) {
-			recv_data_cnt = read_data0.byte1 + read_data0.byte2 * 16;
-			if (recv_data_cnt > 10) {
+        if (packet_type == 0x1A || packet_type == 0x1C) {
+            recv_data_cnt = read_data0.byte1 + read_data0.byte2 * 16;
+            if (recv_data_cnt > 10) {
 #ifdef DDI_DRV_DEBUG_LOG_ENABLE
-				if (dsi_log_on)
-					DDPMSG(" DSI read long packet data  exceeds 4 bytes\n");
+                if (dsi_log_on)
+                    DDPMSG(" DSI read long packet data exceeds 4 bytes\n");
 #endif
-				recv_data_cnt = 10;
-			}
+                recv_data_cnt = 10;
+            }
 
-			if (recv_data_cnt > buffer_size) {
+            if (recv_data_cnt > buffer_size) {
 #ifdef DDI_DRV_DEBUG_LOG_ENABLE
-				if (dsi_log_on)
-					DDPMSG(" DSI read long packet data  exceeds buffer size: %d\n",
-						       buffer_size);
+                if (dsi_log_on)
+                    DDPMSG(" DSI read long packet data exceeds buffer size: %d\n",
+                         buffer_size);
 #endif
-				recv_data_cnt = buffer_size;
-			}
+                recv_data_cnt = buffer_size;
+            }
 #ifdef DDI_DRV_DEBUG_LOG_ENABLE
-			if (dsi_log_on)
-				DDPMSG(" DSI read long packet size: %d\n", recv_data_cnt);
+            if (dsi_log_on)
+                DDPMSG(" DSI read long packet size: %d\n", recv_data_cnt);
 #endif
-			memcpy((void *)buffer, (void *)&read_data1, recv_data_cnt);
-		} else {
+            memcpy((void *)buffer, (void *)&read_data1, recv_data_cnt);
+        } else {
 #ifdef DDI_DRV_DEBUG_LOG_ENABLE
-			if (dsi_log_on)
-				DDPMSG(" DSI read short packet data  exceeds buffer size: %d\n",
-					       buffer_size);
+            if (dsi_log_on)
+                DDPMSG(" DSI read short packet data exceeds buffer size: %d\n",
+                     buffer_size);
 #endif
-			recv_data_cnt = buffer_size;
-			memcpy((void *)buffer, (void *)&read_data0.byte1, 2);
-		}
-	} while (packet_type != 0x1C && packet_type != 0x21 && packet_type != 0x22
-		 && packet_type != 0x1A);
+            recv_data_cnt = buffer_size;
+            memcpy((void *)buffer, (void *)&read_data0.byte1, 2);
+        }
+    } while (packet_type != 0x1C && packet_type != 0x21 && packet_type != 0x22
+         && packet_type != 0x1A);
 
-	return recv_data_cnt;
+    return recv_data_cnt;
 }
 
 void DSI_set_cmdq_V2(enum DISP_MODULE_ENUM module, void *cmdq, unsigned cmd,
@@ -1910,6 +1929,7 @@ void DSI_set_cmdq_V2(enum DISP_MODULE_ENUM module, void *cmdq, unsigned cmd,
 			}
 		} else {
 			DSI_WaitForNotBusy(module, cmdq);
+			//DDPERR("set cmdq in cmd mode in set_cmdq_V2->cmd = 0x%02x\n", cmd);// eebbk <liudj> <20170512> add log for debug
 			if (cmd < 0xB0) {
 				if (count > 1) {
 					t2.CONFG = 2;
@@ -2194,12 +2214,14 @@ static void lcm_mdelay(uint32_t ms)
 void DSI_set_cmdq_V2_DSI0(void *cmdq, unsigned cmd, unsigned char count, unsigned char *para_list,
 			  unsigned char force_update)
 {
+//	DDPERR("[ddp_dsi_ioctl] hgc->force_update1 = %d\n", force_update);
 	DSI_set_cmdq_V2(DISP_MODULE_DSI0, cmdq, cmd, count, para_list, force_update);
 }
 
 void DSI_set_cmdq_V2_Wrapper_DSI0(unsigned cmd, unsigned char count, unsigned char *para_list,
 				  unsigned char force_update)
 {
+//	DDPERR("[ddp_dsi_ioctl] hgc->force_update2 = %d\n", force_update);
 	DSI_set_cmdq_V2(DISP_MODULE_DSI0, NULL, cmd, count, para_list, force_update);
 }
 
@@ -2242,6 +2264,7 @@ int ddp_dsi_set_lcm_utils(enum DISP_MODULE_ENUM module, LCM_DRIVER *lcm_drv)
 	utils->udelay = lcm_udelay;
 	utils->mdelay = lcm_mdelay;
 	if (module == DISP_MODULE_DSI0) {
+		DDPERR("[ddp_dsi_ioctl] hgc->module = %d\n", module);
 		utils->dsi_set_cmdq = DSI_set_cmdq_wrapper_DSI0;
 		utils->dsi_set_cmdq_V2 = DSI_set_cmdq_V2_Wrapper_DSI0;
 		utils->dsi_set_cmdq_V3 = DSI_set_cmdq_V3_Wrapper_DSI0;
@@ -2361,6 +2384,8 @@ int ddp_dsi_init(enum DISP_MODULE_ENUM module, void *cmdq)
 		DSI_BackupRegisters(module, NULL);
 	}
 #endif
+
+	g_dsi_init = true;
 
 	return DSI_STATUS_OK;
 }
@@ -2568,13 +2593,13 @@ int ddp_dsi_config(enum DISP_MODULE_ENUM module, struct disp_ddp_path_config *co
 #endif
 
 	if ((MIPITX_IsEnabled(module, cmdq)) /*&& (atomic_read(&PMaster_enable) == 0)*/) {
-		DISPDBG("mipitx is already init\n");
+		DISPERR("mipitx is already init, dsi_force_config = %d\n",dsi_force_config);
 		if (dsi_force_config)
 			goto force_config;
 		else
 			goto done;
 	} else {
-		DISPDBG("MIPITX is not inited, will config mipitx clock now\n");
+		DISPERR("MIPITX is not inited, will config mipitx clock now\n");
 		DISPDBG("===>Pmaster:CLK SETTING??==> clk:%d\n",
 			  _dsi_context[0].dsi_params.PLL_CLOCK);
 		DSI_PHY_clk_setting(module, NULL, dsi_config);
@@ -2813,7 +2838,7 @@ int ddp_dsi_ioctl(enum DISP_MODULE_ENUM module, void *cmdq_handle, unsigned int 
 			unsigned int count = 1;
 			unsigned int level = params[0];
 
-			DDPMSG("[ddp_dsi_ioctl] level = %d\n", level);
+			DDPERR("[ddp_dsi_ioctl] hgc->level = %d\n", level);
 			DSI_set_cmdq_V2(module, cmdq_handle, cmd, count, ((unsigned char *)&level), 1);
 			break;
 		}
@@ -2886,12 +2911,14 @@ int ddp_dsi_power_on(enum DISP_MODULE_ENUM module, void *cmdq_handle)
 
 	DISPFUNC();
 
+	printk("lyq:%s\n",__func__);
+	dump_stack();
 	if (!s_isDsiPowerOn) {
 #ifdef ENABLE_CLK_MGR
 		if (is_ipoh_bootup) {
 			if (module == DISP_MODULE_DSI0 || module == DISP_MODULE_DSIDUAL) {
 #ifndef CONFIG_MTK_CLKMGR
-				ret += ddp_clk_prepare_enable(TOP_RG_MIPI_26M_DBG);
+				//ret += ddp_clk_prepare_enable(TOP_RG_MIPI_26M_DBG);
 				ret += ddp_clk_enable(DISP1_DSI0_ENGINE);
 				ret += ddp_clk_enable(DISP1_DSI0_DIGITAL);
 #endif
@@ -2907,14 +2934,20 @@ int ddp_dsi_power_on(enum DISP_MODULE_ENUM module, void *cmdq_handle)
 
 		if (module == DISP_MODULE_DSI0 || module == DISP_MODULE_DSIDUAL) {
 #ifndef CONFIG_MTK_CLKMGR
-			ret += ddp_clk_prepare_enable(TOP_RG_MIPI_26M_DBG);
+			//ret += ddp_clk_prepare_enable(TOP_RG_MIPI_26M_DBG);
 			ret += ddp_clk_enable(DISP1_DSI0_ENGINE);
 			ret += ddp_clk_enable(DISP1_DSI0_DIGITAL);
 #endif
 			if (ret > 0)
 				DDPERR("DSI power manager API return false\n");
 		}
-
+		
+		mb(); //mtk add
+		mdelay(1);
+		/* enable clock */
+		DSI_EnableClk(module, NULL);
+		mb(); //mtk add
+		mdelay(1);
 		/* restore dsi register */
 		DSI_RestoreRegisters(module, NULL);
 
@@ -2931,9 +2964,6 @@ int ddp_dsi_power_on(enum DISP_MODULE_ENUM module, void *cmdq_handle)
 		}
 		/* enter wakeup */
 		DSI_Wakeup(module, NULL);
-
-		/* enable clock */
-		DSI_EnableClk(module, NULL);
 
 		DSI_Reset(module, NULL);
 #endif
@@ -2987,7 +3017,7 @@ int ddp_dsi_power_off(enum DISP_MODULE_ENUM module, void *cmdq_handle)
 #ifndef CONFIG_MTK_CLKMGR
 			ddp_clk_disable(DISP1_DSI0_ENGINE);
 			ddp_clk_disable(DISP1_DSI0_DIGITAL);
-			ddp_clk_disable_unprepare(TOP_RG_MIPI_26M_DBG);
+			//ddp_clk_disable_unprepare(TOP_RG_MIPI_26M_DBG);
 #endif
 			if (ret > 0)
 				DDPERR("DSI power manager API return false\n");
@@ -3051,6 +3081,7 @@ void DSI_WaitForNotBusy(enum DISP_MODULE_ENUM module, void *cmdq)
 
 		if (timeout_ms == 0) {
 			DDPMSG(" Wait for DSI engine not busy timeout!!!\n");
+                        DISPPR_ERROR(" Wait for DSI engine not busy timeout!!!\n");// eebbk <liudj> <20170512> add log for debug
 			DSI_DumpRegisters(module, 1);
 			DSI_Reset(module, cmdq);
 		}
@@ -3130,6 +3161,7 @@ int ddp_dsi_build_cmdq(enum DISP_MODULE_ENUM module, void *cmdq_trigger_handle, 
 	int result = 0;
 
 	static cmdqBackupSlotHandle hSlot;
+
 
 	if (module == DISP_MODULE_DSIDUAL)
 		dsi_i = 0;
@@ -3263,28 +3295,33 @@ int ddp_dsi_build_cmdq(enum DISP_MODULE_ENUM module, void *cmdq_trigger_handle, 
 				       AS_UINT32(&read_data0),
 				       AS_UINT32(&(dsi_params->lcm_esd_check_table[i])));
 
-			DISPDBG("[DSI]enter cmp read_data0 byte0=0x%x byte1=0x%x byte2=0x%x byte3=0x%x\n",
+			DISPERR("[DSI]enter cmp read_data0 byte0=0x%x byte1=0x%x byte2=0x%x byte3=0x%x \n",
 				read_data0.byte0,
 				read_data0.byte1,
 				read_data0.byte2,
 				read_data0.byte3);
-			DISPDBG
+			DISPERR("[DSI]enter cmp read_data1 byte0=0x%x byte1=0x%x byte2=0x%x byte3=0x%x \n",
+				read_data1.byte0,
+				read_data1.byte1,
+				read_data1.byte2,
+				read_data1.byte3);
+			DISPERR
 			    ("[DSI]enter cmp check_table cmd=0x%x,count=0x%x,para_list[0]=0x%x,para_list[1]=0x%x\n",
 			     dsi_params->lcm_esd_check_table[i].cmd,
 			     dsi_params->lcm_esd_check_table[i].count,
 			     dsi_params->lcm_esd_check_table[i].para_list[0],
 			     dsi_params->lcm_esd_check_table[i].para_list[1]);
-			DISPDBG("[DSI]enter cmp DSI+0x200=0x%x\n",
+			DISPCHECK("[DSI]enter cmp DSI+0x200=0x%x\n",
 				AS_UINT32(DDP_REG_BASE_DSI0 + 0x200));
-			DISPDBG("[DSI]enter cmp DSI+0x204=0x%x\n",
+			DISPCHECK("[DSI]enter cmp DSI+0x204=0x%x\n",
 				AS_UINT32(DDP_REG_BASE_DSI0 + 0x204));
-			DISPDBG("[DSI]enter cmp DSI+0x60=0x%x\n",
+			DISPCHECK("[DSI]enter cmp DSI+0x60=0x%x\n",
 				AS_UINT32(DDP_REG_BASE_DSI0 + 0x60));
-			DISPDBG("[DSI]enter cmp DSI+0x74=0x%x\n",
+			DISPCHECK("[DSI]enter cmp DSI+0x74=0x%x\n",
 				AS_UINT32(DDP_REG_BASE_DSI0 + 0x74));
-			DISPDBG("[DSI]enter cmp DSI+0x88=0x%x\n",
+			DISPCHECK("[DSI]enter cmp DSI+0x88=0x%x\n",
 				AS_UINT32(DDP_REG_BASE_DSI0 + 0x88));
-			DISPDBG("[DSI]enter cmp DSI+0x0c=0x%x\n",
+			DISPCHECK("[DSI]enter cmp DSI+0x0c=0x%x\n",
 				AS_UINT32(DDP_REG_BASE_DSI0 + 0x0c));
 
 			/* 0x02: acknowledge & error report */
@@ -3297,7 +3334,9 @@ int ddp_dsi_build_cmdq(enum DISP_MODULE_ENUM module, void *cmdq_trigger_handle, 
 			packet_type = read_data0.byte0;
 
 			if (packet_type == 0x1A || packet_type == 0x1C) {
+#if 0
 				recv_data_cnt = read_data0.byte1 + read_data0.byte2 * 16;
+
 				if (recv_data_cnt > 2) {
 					DISPCHECK
 					("Set receive data count from %d to 2 as ESD check supported max data count.\n",
@@ -3313,6 +3352,36 @@ int ddp_dsi_build_cmdq(enum DISP_MODULE_ENUM module, void *cmdq_trigger_handle, 
 				DISPCHECK("DSI read long packet size: %d\n", recv_data_cnt);
 				result = memcmp((void *)&(dsi_params->lcm_esd_check_table[i].para_list[0]),
 					(void *)&read_data1, recv_data_cnt);
+#else
+                unsigned char buffer[20];
+                int i = 0, index = 0;
+                int count = dsi_params->lcm_esd_check_table[i].count;
+
+				recv_data_cnt = read_data0.byte1 + read_data0.byte2 * 16;
+                DISPERR("packet_type=0x%x,recv_data_cnt = %d\n", packet_type, recv_data_cnt);
+
+                if (recv_data_cnt > count)
+                    recv_data_cnt = count;
+                if (recv_data_cnt <= 4) { 
+                    memcpy((void *)buffer, (void *)&read_data1, recv_data_cnt);
+                } else if (recv_data_cnt <= 8) { 
+                    memcpy((void *)buffer, (void *)&read_data1, 4);
+                    memcpy((void *)(buffer + 4), (void *)&read_data2, recv_data_cnt - 4);
+                } else {
+                    memcpy((void *)buffer, (void *)&read_data1, 4);
+                    memcpy((void *)(buffer + 4), (void *)&read_data2, 4);
+                    memcpy((void *)(buffer + 8), (void *)&read_data3, recv_data_cnt - 8);
+                }
+                for (i = 0; i < recv_data_cnt; i++) {
+                    DISPERR("buffer[%d]=0x%x\n", i, buffer[i]);
+                    if (i == 0 || i == 3) {
+                        if (buffer[i] != dsi_params->lcm_esd_check_table[index].para_list[i]) {
+                            DISPERR("HGC[ESD]CMP index %d return value 0x%x,para_list[%d]=0x%x\n", index, buffer[i], i, dsi_params->lcm_esd_check_table[index].para_list[i]);
+                            result = 1;
+                        }
+                    }
+                }
+#endif
 			} else if (packet_type == 0x11 ||
 				   packet_type == 0x12 ||
 				   packet_type == 0x21 ||
@@ -3333,10 +3402,10 @@ int ddp_dsi_build_cmdq(enum DISP_MODULE_ENUM module, void *cmdq_trigger_handle, 
 				result = memcmp((void *)&(dsi_params->lcm_esd_check_table[i].para_list[0]),
 						(void *)&read_data0.byte1, recv_data_cnt);
 			} else if (packet_type == 0x02) {
-				DISPCHECK("read return type is 0x02\n");
+			    DISPERR("HGC read return type is 0x02\n");
 				result = 1;
 			} else {
-				DISPCHECK("read return type is non-recognite, type = 0x%x\n", packet_type);
+				DISPERR("HGC read return type is non-recognite, type = 0x%x\n", packet_type);
 				result = 1;
 			}
 
@@ -3399,8 +3468,8 @@ int ddp_dsi_build_cmdq(enum DISP_MODULE_ENUM module, void *cmdq_trigger_handle, 
 		/* DSI_Start(module, cmdq_trigger_handle); */
 
 	} else if (state == CMDQ_DSI_RESET) {
-		DISPCHECK("CMDQ Timeout, Reset DSI\n");
-		DSI_DumpRegisters(module, 1);
+		DISPERR("[DSI] CMDQ Timeout, Reset DSI\n");
+//		DSI_DumpRegisters(module, 1);
 		DSI_Reset(module, NULL);
 	} else if (state == CMDQ_DSI_LFR_MODE)
 		DISPDBG("[DSI]enter CMDQ_DSI_LFR_MODE\n");
@@ -3470,6 +3539,9 @@ int32_t DSI_ssc_enable(uint32_t dsi_index, uint32_t en)
 
 uint32_t PanelMaster_get_TE_status(uint32_t dsi_idx)
 {
+	if (!g_dsi_init)
+		return 0;
+
 	if (dsi_idx == 0)
 		return dsi0_te_enable ? 1 : 0;
 	return 0;
@@ -3479,12 +3551,18 @@ uint32_t PanelMaster_get_CC(uint32_t dsi_idx)
 {
 	struct DSI_TXRX_CTRL_REG tmp_reg;
 
+	if (!g_dsi_init)
+		return 0;
+
 	DSI_READREG32((struct DSI_TXRX_CTRL_REG *), &tmp_reg, &DSI_REG[dsi_idx]->DSI_TXRX_CTRL);
 	return tmp_reg.HSTX_CKLP_EN ? 1 : 0;
 }
 
 void PanelMaster_set_CC(uint32_t dsi_index, uint32_t enable)
 {
+	if (!g_dsi_init)
+		return;
+
 	DDPMSG("dsi_index:%d set_cc :%d\n", dsi_index, enable);
 	if (dsi_index == PM_DSI0) {
 		DSI_OUTREGBIT(NULL, struct DSI_TXRX_CTRL_REG, DSI_REG[0]->DSI_TXRX_CTRL,
@@ -3497,6 +3575,9 @@ void PanelMaster_DSI_set_timing(uint32_t dsi_index, struct MIPI_TIMING timing)
 	uint32_t hbp_byte;
 	LCM_DSI_PARAMS *dsi_params;
 	int fbconfig_dsiTmpBufBpp = 0;
+
+	if (!g_dsi_init)
+		return;
 
 	if (_dsi_context[dsi_index].dsi_params.data_format.format == LCM_DSI_FORMAT_RGB565)
 		fbconfig_dsiTmpBufBpp = 2;
@@ -3682,6 +3763,9 @@ uint32_t PanelMaster_get_dsi_timing(uint32_t dsi_index, enum MIPI_SETTING_TYPE t
 	struct DSI_REGS *dsi_reg;
 	int fbconfig_dsiTmpBufBpp = 0;
 
+	if (!g_dsi_init)
+		return 0;
+
 	if (_dsi_context[dsi_index].dsi_params.data_format.format == LCM_DSI_FORMAT_RGB565)
 		fbconfig_dsiTmpBufBpp = 2;
 	else
@@ -3801,6 +3885,9 @@ uint32_t PanelMaster_get_dsi_timing(uint32_t dsi_index, enum MIPI_SETTING_TYPE t
 
 unsigned int PanelMaster_set_PM_enable(unsigned int value)
 {
+	if (!g_dsi_init)
+		return 0;
+
 	atomic_set(&PMaster_enable, value);
 	return 0;
 }
@@ -3855,5 +3942,6 @@ int DSI_check_roi(void)
 void DSI_ForceConfig(int forceconfig)
 {
 	dsi_force_config = forceconfig;
+	DISPERR("DSI_ForceConfig, dsi_force_config = %d\n",dsi_force_config);
 }
 

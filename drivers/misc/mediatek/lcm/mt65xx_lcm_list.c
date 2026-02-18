@@ -73,6 +73,22 @@ LCM_DRIVER *lcm_driver_list[] = {
 	&kd070d5450nha6_rgb_dpi_lcm_drv,
 #endif
 
+#if defined(NT35521S_WXGA_DSI_VDO_BOE)
+	&nt35521s_wxga_dsi_vdo_boe_lcm_drv,
+#endif
+
+#if defined(FITI_JD9365_WXGA_DSI_VDO_INNO)
+    &fiti_jd9365_wxga_dsi_vdo_inno_lcm_drv,
+#endif
+
+#if defined(FITI_JD9364_WXGA_DSI_VDO_BOE)
+    &fiti_jd9364_wxga_dsi_vdo_boe_lcm_drv,
+#endif
+
+#if defined(HX83100_WXGA_DSI_VDO_INNOLUX)
+    &hx83100_wxga_dsi_vdo_innolux_lcm_drv,
+#endif
+
 #if defined(KR101IA2S_DSI_VDO)
 	&kr101ia2s_dsi_vdo_lcm_drv,
 #endif

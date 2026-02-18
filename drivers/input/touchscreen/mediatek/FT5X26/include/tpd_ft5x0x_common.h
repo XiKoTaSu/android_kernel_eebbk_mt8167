@@ -151,8 +151,13 @@ int ft5x0x_create_apk_debug_channel(struct i2c_client *client);
 #endif
 
 #ifdef CONFIG_FT_AUTO_UPGRADE_SUPPORT
+#ifdef CONFIG_MTK_I2C_EXTENSION
 extern u8 *tpd_i2c_dma_va;
 extern dma_addr_t tpd_i2c_dma_pa;
+#else
+extern u8 *tpd_i2c_buff;
+extern u8 *tpd_i2c_addr;
+#endif
 extern int tpd_auto_upgrade(struct i2c_client *client);
 #endif
 #endif /* TOUCHPANEL_H__ */

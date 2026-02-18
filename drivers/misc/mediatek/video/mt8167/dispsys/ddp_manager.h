@@ -485,7 +485,7 @@ int dpmgr_module_notify(enum DISP_MODULE_ENUM module, enum DISP_PATH_EVENT event
 /*dpmgr_reset_module_handle, reset moudle path handle for single panel*/
 int dpmgr_reset_module_handle(disp_path_handle dp_handle);
 #endif
-
+int dpmgr_path_dsi_reset(disp_path_handle dp_handle,int encmdq);// eebbk <liudj> <20170512> add for debug
 /* struct disp_session_input_config *captured_session_input; */
 
 #endif

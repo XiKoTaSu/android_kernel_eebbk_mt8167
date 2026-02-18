@@ -306,7 +306,7 @@ irqreturn_t disp_irq_handler(int irq, void *dev_id)
 		module = DISP_MODULE_DSI0;
 		reg_val = (DISP_REG_GET(dsi_reg_va + 0xC) & 0xff);
 		DDPIRQ("IRQ: DSI, irq=0x%x\n", (unsigned int)reg_val);
-		if (atomic_read(&ESDCheck_byCPU) == 0) {
+		if (atomic_read(&ESDCheck_byCPU) == 1) {
 			/* rd_rdy don't clear and wait for ESD & Read LCM will clear the bit. */
 			reg_temp_val = reg_val & 0xfffe;
 			DISP_CPU_REG_SET(dsi_reg_va + 0xC, ~reg_temp_val);

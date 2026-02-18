@@ -784,6 +784,14 @@ void load_lcm_resources_from_DT(LCM_DRIVER *lcm_drv)
 }
 #endif
 
+static int lcm_vendor_id = -1;
+
+//0-boe(nova nt35523) 1-innolux(fiti jd9365) 2-boe(fiti jd9364)
+int disp_get_lcm_vendor_id(void)
+{
+    return lcm_vendor_id;
+}
+
 struct disp_lcm_handle *disp_lcm_probe(char *plcm_name, LCM_INTERFACE_ID lcm_id)
 {
 	int lcmindex = 0;
@@ -819,6 +827,7 @@ struct disp_lcm_handle *disp_lcm_probe(char *plcm_name, LCM_INTERFACE_ID lcm_id)
 			isLCMFound = true;
 		}
 		lcmindex = 0;
+        lcm_vendor_id = 0;
 	} else {
 		if (plcm_name == NULL) {
 			/* TODO: we need to detect all the lcm driver */
@@ -827,19 +836,22 @@ struct disp_lcm_handle *disp_lcm_probe(char *plcm_name, LCM_INTERFACE_ID lcm_id)
 
 			for (i = 0; i < _lcm_count(); i++) {
 				lcm_drv = lcm_driver_list[i];
+				printk("hgc->lcm_drv->name = %s, plcm_name = %s\n", lcm_drv->name, plcm_name);
+				
 #if defined(MTK_LCM_DEVICE_TREE_SUPPORT)
 				lcm_drv->name = lcm_name_list[i];
 #endif
-				if (!strcmp(lcm_drv->name, plcm_name)) {
+				if ( !strncmp(lcm_drv->name, plcm_name, strlen(plcm_name)-1 ) ) {
+					printk("hgc->is lcm found!!!\n");
 					isLCMFound = true;
 					isLCMInited = true;
 					lcmindex = i;
+                    lcm_vendor_id = i;
 					break;
 				}
 			}
-
-			DISPERR("FATAL ERROR: can't found lcm driver:%s in linux kernel driver\n",
-				plcm_name);
+			if (i == _lcm_count() )
+				DISPERR("FATAL ERROR: can't found lcm driver:%s in linux kernel driver\n", plcm_name);
 		}
 		/* TODO: */
 	}
@@ -853,7 +865,7 @@ struct disp_lcm_handle *disp_lcm_probe(char *plcm_name, LCM_INTERFACE_ID lcm_id)
 	lcm_param = kzalloc(sizeof(uint8_t *) * sizeof(LCM_PARAMS), GFP_KERNEL);
 	if (plcm && lcm_param) {
 		plcm->params = lcm_param;
-		plcm->drv = lcm_drv;
+		plcm->drv = lcm_drv;			//lyq this is get lcm driver list
 		plcm->is_inited = isLCMInited;
 		plcm->index = lcmindex;
 	} else {
@@ -884,6 +896,7 @@ struct disp_lcm_handle *disp_lcm_probe(char *plcm_name, LCM_INTERFACE_ID lcm_id)
 			plcm->lcm_original_width = plcm->params->width;
 			plcm->lcm_original_height = plcm->params->height;
 			_dump_lcm_info(plcm);
+			printk("hgc->_dump_lcm_info complete!!!\n");
 			return plcm;
 		}
 
@@ -906,7 +919,7 @@ int disp_lcm_init(struct disp_lcm_handle *plcm, int force)
 	DISPPRINT("%s\n", __func__);
 	if (_is_lcm_inited(plcm)) {
 		lcm_drv = plcm->drv;
-
+#if 0
 		if (lcm_drv->init_power) {
 			if (!disp_lcm_is_inited(plcm) || force)
 				lcm_drv->init_power();
@@ -919,7 +932,7 @@ int disp_lcm_init(struct disp_lcm_handle *plcm, int force)
 			DISPERR("FATAL ERROR, lcm_drv->init is null\n");
 			return -1;
 		}
-
+#endif
 		return 0;
 	}
 
@@ -1032,8 +1045,8 @@ int disp_lcm_suspend(struct disp_lcm_handle *plcm)
 			return -1;
 		}
 
-		if (lcm_drv->suspend_power)
-			lcm_drv->suspend_power();
+//		if (lcm_drv->suspend_power)
+//			lcm_drv->suspend_power();
 
 		return 0;
 	}
@@ -1053,8 +1066,8 @@ int disp_lcm_resume(struct disp_lcm_handle *plcm)
 	if (_is_lcm_inited(plcm)) {
 		lcm_drv = plcm->drv;
 
-		if (lcm_drv->resume_power)
-			lcm_drv->resume_power();
+//		if (lcm_drv->resume_power)
+//			lcm_drv->resume_power();
 
 		if (lcm_drv->resume) {
 			lcm_drv->resume();
@@ -1075,15 +1088,16 @@ int disp_lcm_resume(struct disp_lcm_handle *plcm)
 #ifdef MT_TODO
 #error "maybe CABC can be moved into lcm_ioctl??"
 #endif
-int disp_lcm_set_backlight(struct disp_lcm_handle *plcm, int level)
+int disp_lcm_set_backlight(struct disp_lcm_handle *plcm, void *handle, int level)
 {
 	LCM_DRIVER *lcm_drv = NULL;
 
 	DISPFUNC();
+
 	if (_is_lcm_inited(plcm)) {
 		lcm_drv = plcm->drv;
-		if (lcm_drv->set_backlight) {
-			lcm_drv->set_backlight(level);
+		if (lcm_drv->set_backlight_cmdq) {
+			lcm_drv->set_backlight_cmdq(handle, level);
 		} else {
 			DISPERR("FATAL ERROR, lcm_drv->set_backlight is null\n");
 			return -1;
